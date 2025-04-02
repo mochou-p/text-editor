@@ -1,0 +1,27 @@
+# text-editor/Cargo.toml
+
+[package]
+name         = "text-editor"
+version      = "0.0.0"
+
+edition      = "2021"
+rust-version = "1.56.0"
+
+authors      = ["mochou-p"]
+description  = "simple text-based text editor"
+readme       = "README.md"
+license      = "MIT OR Apache-2.0"
+repository   = "https://github.com/mochou-p/text-editor"
+
+keywords     = ["text-editor", "text-based"]
+categories   = ["text-editors", "command-line-utilities", "development-tools", "filesystem"]
+
+[dependencies]
+crossterm = { version = "0.28.1", default-features = false, features = ["events"] }
+
+[lints.clippy]
+all      = "forbid"
+pedantic = "deny"
+nursery  = "forbid"
+cargo    = "deny"
+
