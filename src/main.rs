@@ -2,6 +2,7 @@
 
 #![expect(clippy::multiple_crate_versions, reason = "crossterm")]
 
+mod config;
 mod editor;
 
 use std::error::Error;

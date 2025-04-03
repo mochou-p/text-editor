@@ -13,10 +13,20 @@ use crossterm::{
     execute
 };
 
+use super::config::Config;
+
+
+#[derive(Default)]
+struct LongestLine {
+    index:  usize,
+    length: u16
+}
 
 #[expect(clippy::module_name_repetitions)]
 pub struct TextEditor {
     out: Stdout,
+
+    _config: Config,
 
     columns:  u16,
     rows:     u16,
@@ -31,6 +41,8 @@ impl TextEditor {
     pub fn new() -> io::Result<Self> {
         let out = stdout();
 
+        let config = Config::load()?;
+
         let (columns, rows) = terminal::size()?;
         let cursor_x = 0;
         let cursor_y = 0;
@@ -41,6 +53,7 @@ impl TextEditor {
 
         Ok(Self {
             out,
+            _config: config,
             columns, rows, cursor_x, cursor_y,
             lines, longest_line
         })
@@ -239,11 +252,5 @@ impl TextEditor {
 
         Ok(longest)
     }
-}
-
-#[derive(Default)]
-struct LongestLine {
-    index:  usize,
-    length: u16
 }
 
