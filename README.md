@@ -3,6 +3,14 @@
 # text editor
 simple text-based text editor
 
+# configuration
+file location is in the root of this project `./config.conf`  
+you can ommit settings, and default values will be used  
+when no file is present, a default one like this will be generated:
+```conf
+alignment = center-left
+```
+
 ## License
 Licensed under either of
  * Apache License, Version 2.0  
