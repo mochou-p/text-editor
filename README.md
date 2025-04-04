@@ -7,8 +7,38 @@ simple text-based text editor
 file location is in the root of this project `./config.conf`  
 you can ommit settings, and default values will be used  
 when no file is present, a default one like this will be generated:
-```conf
-alignment = center-left
+```py
+alignment-horizontal = left    # left/center-left/center/center-right/right
+alignment-vertical   = center  # top/center/bottom
+```
+
+# configuration properties
+### alignment-horizontal
+```
+left         center       right
++---------+  +---------+  +---------+
+|#####    |  |  #####  |  |    #####|
+|###      |  |   ###   |  |      ###|
+|#        |  |    #    |  |        #|
+|###      |  |   ###   |  |      ###|
++---------+  +---------+  +---------+
+
+center-left  center-right
++---------+  +---------+
+|  #####  |  |  #####  |
+|  ###    |  |    ###  |
+|  #      |  |      #  |
+|  ###    |  |    ###  |
++---------+  +---------+
+```
+### alignment-vertical
+```
+top          center       bottom
++---------+  +---------+  +---------+
+|#########|  |         |  |         |
+|         |  |#########|  |         |
+|         |  |         |  |#########|
++---------+  +---------+  +---------+
 ```
 
 ## License

@@ -228,10 +228,7 @@ impl TextEditor {
         for _ in 0..self.lines.len() {
             let y = self.config.valignment.get_y(self)?;
 
-            execute!(
-                self.out,
-                cursor::MoveToRow(y)
-            )?;
+            execute!(self.out, cursor::MoveToRow(y))?;
 
             self.reprint_current_line(shrink)?;
             self.cursor_y += 1;
