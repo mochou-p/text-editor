@@ -13,7 +13,7 @@ use crossterm::{
     execute
 };
 
-use super::config::{Alignment, Config};
+use super::config::{HAlignment, Config};
 
 
 #[derive(Default)]
@@ -29,7 +29,7 @@ pub struct TextEditor {
     config: Config,
 
     pub columns:   u16,
-        rows:      u16,
+    pub rows:      u16,
         _cursor_x: u16,
     pub cursor_y:  u16,
 
@@ -61,10 +61,10 @@ impl TextEditor {
 
     // terminal state //////////////////////////////////////////////////////////////////
 
-    fn prepare_terminal(&mut self) -> io::Result<()> {
+    fn prepare_terminal(&mut self) -> Result<(), Box<dyn Error>> {
         let (x, y) = (
             self.config.halignment.get_starting_x(self.columns),
-            self.rows / 2 - 1
+            self.config.valignment.get_y(self)?
         );
 
         execute!(
@@ -74,7 +74,9 @@ impl TextEditor {
             cursor::MoveTo(x, y)
         )?;
 
-        terminal::enable_raw_mode()
+        terminal::enable_raw_mode()?;
+
+        Ok(())
     }
 
     fn restore_terminal(&mut self) -> io::Result<()> {
@@ -84,7 +86,7 @@ impl TextEditor {
 
     // main loop ///////////////////////////////////////////////////////////////////////
 
-    pub fn run(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn run(mut self) -> Result<(), Box<dyn Error>> {
         self.prepare_terminal()?;
 
         loop {
@@ -126,7 +128,7 @@ impl TextEditor {
         line.push(c);
         let len = line.len();
 
-        if len > self.longest_line.length as usize {
+        if self.config.halignment.needs_longest_line() && len > self.longest_line.length as usize {
             self.longest_line.index  = y;
             self.longest_line.length = u16::try_from(len)?;
 
@@ -153,10 +155,14 @@ impl TextEditor {
 
         self.lines[y].pop();
 
-        if self.lines.len() > 1 && self.longest_line.index == y {
+        if self.config.halignment.needs_longest_line() && self.lines.len() > 1 && self.longest_line.index == y {
             self.longest_line.length -= 1;
             self.longest_line         = self.find_longest_line()?;
-            self.reprint_previous_lines(true)?;
+
+            self.reprint_previous_lines(
+                self.config.halignment == HAlignment::CenterLeft
+            )?;
+
             self.cursor_y -= 1;
         } else {
             execute!(self.out, terminal::Clear(ClearType::CurrentLine))?;
@@ -192,7 +198,7 @@ impl TextEditor {
         let mut x = self.config.halignment.get_x(self)?;
 
         match self.config.halignment {
-            Alignment::Center | Alignment::CenterRight | Alignment::Right => {
+            HAlignment::Center | HAlignment::CenterRight | HAlignment::Right => {
                 execute!(self.out, terminal::Clear(ClearType::CurrentLine))?;
             },
             _ => ()
@@ -220,18 +226,11 @@ impl TextEditor {
         self.cursor_y = 0;
 
         for _ in 0..self.lines.len() {
-            let len = u16::try_from(self.lines.len())?;
+            let y = self.config.valignment.get_y(self)?;
 
             execute!(
                 self.out,
-                cursor::MoveToRow(
-                    self.cursor_y
-                    + self.rows
-                        / 2
-                    - len
-                        / 2
-                    - 1
-                )
+                cursor::MoveToRow(y)
             )?;
 
             self.reprint_current_line(shrink)?;

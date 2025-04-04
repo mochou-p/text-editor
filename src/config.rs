@@ -24,12 +24,14 @@ static CORRECT_FORMAT: &str = "         correct format: `property = value`";
 
 #[derive(Default)]
 pub struct Config {
-    pub halignment: Alignment
+    pub halignment: HAlignment,
+    pub valignment: VAlignment
 }
 
 #[derive(Default)]
 struct ConfigOptions {
-    halignment: Option<Alignment>
+    halignment: Option<HAlignment>,
+    valignment: Option<VAlignment>
 }
 
 impl Config {
@@ -46,7 +48,7 @@ impl Config {
                 warn!("configuration file not found, creating `{}` with default values", CONFIG_FILE);
 
                 let mut file = File::create(CONFIG_FILE)?;
-                file.write_all(b"alignment = center-left  # left/center-left/center/center-right/right\n\n")?;
+                file.write_all(b"alignment-horizontal = left    # left/center-left/center/center-right/right\nalignment-vertical   = center  # top/center/bottom\n\n")?;
 
                 Self::default()
             }
@@ -105,27 +107,44 @@ impl Config {
                 let property = line[..equals    ].trim_end();
                 let value    = line[equals + 1..].trim_start();
 
+                // TODO: clean up
                 match property {
-                    "alignment" => {
+                    "alignment-horizontal" => {
                         if config.halignment.is_some() {
-                            warn!("{CONFIG_FILE}:{}: duplicate declaration of `alignment`", i + 1);
+                            warn!("{CONFIG_FILE}:{}: duplicate declaration of `alignment-horizontal`", i + 1);
                             continue;
                         }
 
                         match value {
-                            "left"         => { config.halignment = Some(Alignment::Left)        },
-                            "center-left"  => { config.halignment = Some(Alignment::CenterLeft)  },
-                            "center"       => { config.halignment = Some(Alignment::Center)      },
-                            "center-right" => { config.halignment = Some(Alignment::CenterRight) },
-                            "right"        => { config.halignment = Some(Alignment::Right)       },
+                            "left"         => { config.halignment = Some(HAlignment::Left)        },
+                            "center-left"  => { config.halignment = Some(HAlignment::CenterLeft)  },
+                            "center"       => { config.halignment = Some(HAlignment::Center)      },
+                            "center-right" => { config.halignment = Some(HAlignment::CenterRight) },
+                            "right"        => { config.halignment = Some(HAlignment::Right)       },
                             other => {
-                                warn!("{CONFIG_FILE}:{}: `{other}` is not a valid `alignment` value\n         values: `left`, `center-left`, `center`, `center-right`, `right`", i + 1);
+                                warn!("{CONFIG_FILE}:{}: `{other}` is not a valid `alignment-horizontal` value\n         values: `left`, `center-left`, `center`, `center-right`, `right`", i + 1);
+                                continue;
+                            }
+                        }
+                    },
+                    "alignment-vertical" => {
+                        if config.valignment.is_some() {
+                            warn!("{CONFIG_FILE}:{}: duplicate declaration of `alignment-vertical`", i + 1);
+                            continue;
+                        }
+
+                        match value {
+                            "top"    => { config.valignment = Some(VAlignment::Top)    },
+                            "center" => { config.valignment = Some(VAlignment::Center) },
+                            "bottom" => { config.valignment = Some(VAlignment::Bottom) },
+                            other => {
+                                warn!("{CONFIG_FILE}:{}: `{other}` is not a valid `alignment-vertical` value\n         values: `top`, `center`, `bottom`", i + 1);
                                 continue;
                             }
                         }
                     },
                     other => {
-                        warn!("{CONFIG_FILE}:{}: `{other}` is not a valid property\n         properties: `alignment`", i + 1);
+                        warn!("{CONFIG_FILE}:{}: `{other}` is not a valid property\n         properties: `alignment-horizontal`, `alignment-vertical`", i + 1);
                         continue;
                     }
                 }
@@ -135,21 +154,28 @@ impl Config {
             }
         }
 
-        Self { halignment: config.halignment.unwrap_or_default() }
+        Self {
+            halignment: config.halignment.unwrap_or_default(),
+            valignment: config.valignment.unwrap_or_default()
+        }
     }
 }
 
 #[derive(Default, PartialEq, Eq)]
-pub enum Alignment {
-    Left,
+pub enum HAlignment {
     #[default]
+    Left,
     CenterLeft,
     Center,
     CenterRight,
     Right
 }
 
-impl Alignment {
+impl HAlignment {
+    pub const fn needs_longest_line(&self) -> bool {
+        matches!(self, Self::CenterLeft | Self::CenterRight)
+    }
+
     pub const fn get_starting_x(&self, columns: u16) -> u16 {
         match self {
             Self::Left  => 0,
@@ -187,6 +213,36 @@ impl Alignment {
                 te.columns
                 - 1
                 - u16::try_from(te.lines[te.cursor_y as usize].len())?
+            }
+        })
+    }
+}
+
+#[derive(Default)]
+pub enum VAlignment {
+    #[default]
+    Top,
+    Center,
+    Bottom
+}
+
+impl VAlignment {
+    pub fn get_y(&self, te: &TextEditor) -> Result<u16, <u16 as TryFrom<usize>>::Error> {
+        Ok(match self {
+            Self::Top    => te.cursor_y,
+            Self::Center => {
+                te.cursor_y
+                + te.rows
+                    / 2
+                - u16::try_from(te.lines.len())?
+                    / 2
+                - 1
+            },
+            Self::Bottom => {
+                te.rows
+                - 1
+                - u16::try_from(te.lines.len())?
+                + te.cursor_y
             }
         })
     }
