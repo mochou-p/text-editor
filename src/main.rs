@@ -15,8 +15,3 @@ fn main() -> Result<(), Box<dyn Error>> {
     te.run()
 }
 
-/* FIXME
-do not crash on max width/height, impl overflow & scroll
-sometimes alternate screen somehow doesnt clear terminal
-*/
-

@@ -13,28 +13,28 @@ use crossterm::{
     execute
 };
 
-use super::config::Config;
+use super::config::{Alignment, Config};
 
 
 #[derive(Default)]
-struct LongestLine {
-    index:  usize,
-    length: u16
+pub struct LongestLine {
+        index:  usize,
+    pub length: u16
 }
 
 #[expect(clippy::module_name_repetitions)]
 pub struct TextEditor {
     out: Stdout,
 
-    _config: Config,
+    config: Config,
 
-    columns:  u16,
-    rows:     u16,
-    cursor_x: u16,
-    cursor_y: u16,
+    pub columns:   u16,
+        rows:      u16,
+        _cursor_x: u16,
+    pub cursor_y:  u16,
 
-    lines:        Vec<String>,
-    longest_line: LongestLine
+    pub lines:        Vec<String>,
+    pub longest_line: LongestLine
 }
 
 impl TextEditor {
@@ -53,8 +53,8 @@ impl TextEditor {
 
         Ok(Self {
             out,
-            _config: config,
-            columns, rows, cursor_x, cursor_y,
+            config,
+            columns, rows, _cursor_x: cursor_x, cursor_y,
             lines, longest_line
         })
     }
@@ -62,13 +62,16 @@ impl TextEditor {
     // terminal state //////////////////////////////////////////////////////////////////
 
     fn prepare_terminal(&mut self) -> io::Result<()> {
+        let (x, y) = (
+            self.config.halignment.get_starting_x(self.columns),
+            self.rows / 2 - 1
+        );
+
         execute!(
             self.out,
             terminal::EnterAlternateScreen,
-            cursor::MoveTo(
-                self.cursor_x + self.columns / 2 - 1,
-                self.cursor_y + self.rows    / 2 - 1
-            )
+            terminal::Clear(ClearType::FromCursorUp),
+            cursor::MoveTo(x, y)
         )?;
 
         terminal::enable_raw_mode()
@@ -128,6 +131,9 @@ impl TextEditor {
             self.longest_line.length = u16::try_from(len)?;
 
             execute!(self.out, terminal::Clear(ClearType::FromCursorUp))?;
+            if self.cursor_y % 2 == 1 {
+                self.cursor_y -= 1;
+            }
             self.reprint_previous_lines(false)?;
             self.cursor_y -= 1;
         }
@@ -182,8 +188,15 @@ impl TextEditor {
 
     // printing ////////////////////////////////////////////////////////////////////////
 
-    fn reprint_current_line(&mut self, shrink: bool) -> io::Result<()> {
-        let mut x = self.centered_starting_column();
+    fn reprint_current_line(&mut self, shrink: bool) -> Result<(), Box<dyn Error>> {
+        let mut x = self.config.halignment.get_x(self)?;
+
+        match self.config.halignment {
+            Alignment::Center | Alignment::CenterRight | Alignment::Right => {
+                execute!(self.out, terminal::Clear(ClearType::CurrentLine))?;
+            },
+            _ => ()
+        }
 
         if shrink {
             x -= 1;
@@ -198,7 +211,9 @@ impl TextEditor {
             print!("{line}");
         }
 
-        execute!(self.out, terminal::Clear(ClearType::UntilNewLine))
+        execute!(self.out, terminal::Clear(ClearType::UntilNewLine))?;
+
+        Ok(())
     }
 
     fn reprint_previous_lines(&mut self, shrink: bool) -> Result<(), Box<dyn Error>> {
@@ -227,14 +242,6 @@ impl TextEditor {
     }
 
     // utils ///////////////////////////////////////////////////////////////////////////
-
-    const fn centered_starting_column(&self) -> u16 {
-        self.columns
-            / 2
-        - 1
-        - self.longest_line.length
-            / 2
-    }
 
     // FIXME: this temp approach scales with file size,
     //        so cache and sort later

@@ -5,6 +5,8 @@ use std::{
     io::{self, ErrorKind, Write as _}
 };
 
+use super::editor::TextEditor;
+
 
 macro_rules! warn {
     ($str: expr) => {
@@ -22,7 +24,7 @@ static CORRECT_FORMAT: &str = "         correct format: `property = value`";
 
 #[derive(Default)]
 pub struct Config {
-    halignment: Alignment
+    pub halignment: Alignment
 }
 
 #[derive(Default)]
@@ -44,15 +46,11 @@ impl Config {
                 warn!("configuration file not found, creating `{}` with default values", CONFIG_FILE);
 
                 let mut file = File::create(CONFIG_FILE)?;
-                file.write_all(b"alignment = center-left  # left/center-left/center/center-right/right\n")?;
+                file.write_all(b"alignment = center-left  # left/center-left/center/center-right/right\n\n")?;
 
                 Self::default()
             }
         };
-
-        if config.halignment != Alignment::default() {
-            warn!("only `center-left` is currently implemented for `alignment`");
-        }
 
         Ok(config)
     }
@@ -141,7 +139,7 @@ impl Config {
     }
 }
 
-#[derive(Default, PartialEq)]
+#[derive(Default, PartialEq, Eq)]
 pub enum Alignment {
     Left,
     #[default]
@@ -149,5 +147,48 @@ pub enum Alignment {
     Center,
     CenterRight,
     Right
+}
+
+impl Alignment {
+    pub const fn get_starting_x(&self, columns: u16) -> u16 {
+        match self {
+            Self::Left  => 0,
+            Self::Right => columns - 1,
+            _           => columns / 2 - 1
+        }
+    }
+
+    pub fn get_x(&self, te: &TextEditor) -> Result<u16, <u16 as TryFrom<usize>>::Error> {
+        Ok(match self {
+            Self::Left => 0,
+            Self::CenterLeft => {
+                te.columns
+                    / 2
+                - 1
+                - te.longest_line.length
+                    / 2
+            },
+            Self::Center => {
+                te.columns
+                    / 2
+                - 1
+                - u16::try_from(te.lines[te.cursor_y as usize].len())?
+                    / 2
+            },
+            Self::CenterRight => {
+                te.columns
+                    / 2
+                - 1
+                + te.longest_line.length
+                    / 2
+                - u16::try_from(te.lines[te.cursor_y as usize].len())?
+            },
+            Self::Right => {
+                te.columns
+                - 1
+                - u16::try_from(te.lines[te.cursor_y as usize].len())?
+            }
+        })
+    }
 }
 
