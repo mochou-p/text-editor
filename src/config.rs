@@ -48,7 +48,7 @@ impl Config {
                 warn!("configuration file not found, creating `{}` with default values", CONFIG_FILE);
 
                 let mut file = File::create(CONFIG_FILE)?;
-                file.write_all(b"alignment-horizontal = left    # left/center-left/center/center-right/right\nalignment-vertical   = center  # top/center/bottom\n\n")?;
+                file.write_all(b"alignment-horizontal = left  # left/center-left/center/center-right/right\nalignment-vertical   = top   # top/center/bottom\n\n")?;
 
                 Self::default()
             }

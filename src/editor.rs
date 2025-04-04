@@ -8,7 +8,7 @@ use std::{
 
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyboardEnhancementFlags, KeyCode, KeyEventKind, KeyModifiers},
     terminal::{self, ClearType},
     execute
 };
@@ -71,7 +71,14 @@ impl TextEditor {
             self.out,
             terminal::EnterAlternateScreen,
             terminal::Clear(ClearType::FromCursorUp),
-            cursor::MoveTo(x, y)
+            cursor::MoveTo(x, y),
+            event::PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                |
+                KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                |
+                KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+            )
         )?;
 
         terminal::enable_raw_mode()?;
@@ -81,7 +88,11 @@ impl TextEditor {
 
     fn restore_terminal(&mut self) -> io::Result<()> {
         terminal::disable_raw_mode()?;
-        execute!(self.out, terminal::LeaveAlternateScreen)
+        execute!(
+            self.out,
+            event::PopKeyboardEnhancementFlags,
+            terminal::LeaveAlternateScreen
+        )
     }
 
     // main loop ///////////////////////////////////////////////////////////////////////
@@ -92,10 +103,31 @@ impl TextEditor {
         loop {
             match event::read()? {
                 Event::Key(key_event) => {
+                    if key_event.code == KeyCode::Esc {
+                        break;
+                    }
+
+                    if key_event.kind == KeyEventKind::Release && matches!(key_event.code, KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Enter) {
+                        continue;
+                    }
+
+                    if !key_event.modifiers.is_empty() {
+                        if !key_event.modifiers.contains(KeyModifiers::CONTROL) {
+                            continue;
+                        }
+
+                        let KeyCode::Char(c) = key_event.code else { continue; };
+
+                        if c != 's' {
+                            continue;
+                        }
+
+                        todo!();
+
+                        // continue;
+                    }
+
                     match key_event.code {
-                        KeyCode::Esc => {
-                            break;
-                        },
                         KeyCode::Char(c) => {
                             self.push(c)?;
                         },

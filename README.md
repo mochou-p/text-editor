@@ -8,8 +8,8 @@ file location is in the root of this project `./config.conf`
 you can ommit settings, and default values will be used  
 when no file is present, a default one like this will be generated:
 ```py
-alignment-horizontal = left    # left/center-left/center/center-right/right
-alignment-vertical   = center  # top/center/bottom
+alignment-horizontal = left  # left/center-left/center/center-right/right
+alignment-vertical   = top   # top/center/bottom
 ```
 
 # configuration properties
