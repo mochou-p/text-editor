@@ -1,23 +1,15 @@
 // text-editor/src/config.rs
 
 use std::{
-    fs::{File, read_to_string},
+    fs::{self, File},
     io::{self, ErrorKind, Write as _}
 };
 
-use super::editor::TextEditor;
+use {
+    super::{editor::TextEditor, utils::CastResult},
+    crate::{error, warn}
+};
 
-
-macro_rules! warn {
-    ($str: expr) => {
-        eprintln!("\x1b[33mwarning\x1b[0m: {}", $str);
-    };
-
-    ($fmt: expr, $($args: expr),+) => {
-        eprint!("\x1b[33mwarning\x1b[0m: ");
-        eprintln!($fmt $(,$args)+);
-    };
-}
 
 static CONFIG_FILE:    &str = "config.conf";
 static CORRECT_FORMAT: &str = "         correct format: `property = value`";
@@ -36,13 +28,23 @@ struct ConfigOptions {
 
 impl Config {
     pub fn load() -> io::Result<Self> {
-        let config = match read_to_string(CONFIG_FILE) {
+        let config = match fs::read_to_string(CONFIG_FILE) {
             Ok(string) => {
                 Self::parse_conf(&string)
             },
             Err(err) => {
-                if err.kind() != ErrorKind::NotFound {
-                    todo!();
+                match err.kind() {
+                    ErrorKind::NotFound => (),
+                    ErrorKind::PermissionDenied => {
+                        error!("current user lacks read privilege to configuration `{}`", CONFIG_FILE);
+
+                        return Err(err);
+                    },
+                    _ => {
+                        error!("std::fs::read_to_string failed to read configuration `{}`", CONFIG_FILE);
+
+                        return Err(err);
+                    }
                 }
 
                 warn!("configuration file not found, creating `{}` with default values", CONFIG_FILE);
@@ -176,49 +178,54 @@ impl HAlignment {
         matches!(self, Self::CenterLeft | Self::CenterRight)
     }
 
-    pub const fn get_starting_x(&self, columns: u16) -> u16 {
-        match self {
-            Self::Left  => 0,
-            Self::Right => columns - 1,
-            _           => columns / 2 - 1
-        }
+    pub fn get_starting_x(&self, te: &TextEditor) -> CastResult<u16, usize, u16> {
+        Ok(if *self == Self::Right {
+            te.columns - 1
+        } else {
+            let len = u16::try_from(te.lines[te.lines.len() - 1].len())?;
+
+            match self {
+                Self::Left       => len,
+                Self::CenterLeft => {
+                    (te.columns - te.longest_line.length) / 2 + len
+                },
+                Self::Center => {
+                    (te.columns + len) / 2
+                    - (1 - (len % 2))
+                },
+                Self::CenterRight => {
+                    (te.columns + te.longest_line.length) / 2 - 1
+                },
+                Self::Right => unreachable!()
+            }
+        })
     }
 
-    pub fn get_x(&self, te: &TextEditor) -> Result<u16, <u16 as TryFrom<usize>>::Error> {
+    pub fn get_x(&self, te: &TextEditor) -> CastResult<u16, usize, u16> {
         Ok(match self {
             Self::Left => 0,
             Self::CenterLeft => {
-                te.columns
-                    / 2
-                - 1
-                - te.longest_line.length
-                    / 2
+                te.columns / 2 - 1
+                - te.longest_line.length / 2
             },
             Self::Center => {
-                te.columns
-                    / 2
-                - 1
-                - u16::try_from(te.lines[te.cursor_y as usize].len())?
-                    / 2
+                te.columns / 2 - 1
+                - u16::try_from(te.lines[te.cursor_y as usize].len())? / 2
             },
             Self::CenterRight => {
-                te.columns
-                    / 2
-                - 1
-                + te.longest_line.length
-                    / 2
+                te.columns / 2 - 1
+                + te.longest_line.length / 2
                 - u16::try_from(te.lines[te.cursor_y as usize].len())?
             },
             Self::Right => {
-                te.columns
-                - 1
+                te.columns - 1
                 - u16::try_from(te.lines[te.cursor_y as usize].len())?
             }
         })
     }
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq, Eq)]
 pub enum VAlignment {
     #[default]
     Top,
@@ -227,20 +234,16 @@ pub enum VAlignment {
 }
 
 impl VAlignment {
-    pub fn get_y(&self, te: &TextEditor) -> Result<u16, <u16 as TryFrom<usize>>::Error> {
+    pub fn get_y(&self, te: &TextEditor) -> CastResult<u16, usize, u16> {
         Ok(match self {
             Self::Top    => te.cursor_y,
             Self::Center => {
                 te.cursor_y
-                + te.rows
-                    / 2
-                - u16::try_from(te.lines.len())?
-                    / 2
-                - 1
+                + te.rows / 2 - 1
+                - u16::try_from(te.lines.len())? / 2
             },
             Self::Bottom => {
-                te.rows
-                - 1
+                te.rows - 1
                 - u16::try_from(te.lines.len())?
                 + te.cursor_y
             }

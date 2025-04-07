@@ -3,17 +3,23 @@
 use std::{
     convert::TryFrom,
     error::Error,
-    io::{self, stdout, Stdout}
+    io::{self, ErrorKind, stdout, Stdout},
+    env, fs, panic
 };
 
 use crossterm::{
-    cursor,
     event::{self, Event, KeyboardEnhancementFlags, KeyCode, KeyEventKind, KeyModifiers},
     terminal::{self, ClearType},
-    execute
+    cursor, execute
 };
 
-use super::config::{HAlignment, Config};
+use {
+    super::{
+        config::{HAlignment, Config},
+        utils::CastResult
+    },
+    crate::error
+};
 
 
 #[derive(Default)]
@@ -22,11 +28,36 @@ pub struct LongestLine {
     pub length: u16
 }
 
+impl LongestLine {
+    // FIXME: this temp approach scales with file size,
+    //        so cache and sort later
+    fn from(lines: &[String]) -> CastResult<Self, usize, u16> {
+        let mut longest = Self::default();
+
+        for (i, line) in lines.iter().enumerate() {
+            let len = line.len();
+
+            if len > longest.length as usize {
+                longest.index  = i;
+                longest.length = u16::try_from(len)?;
+            }
+        }
+
+        Ok(longest)
+    }
+}
+
+enum FileResult {
+    Some((String, Vec<String>)),
+    None,
+    Err(String)
+}
+
 #[expect(clippy::module_name_repetitions)]
 pub struct TextEditor {
-    out: Stdout,
-
+    out:    Stdout,
     config: Config,
+    file:   Option<String>,
 
     pub columns:   u16,
     pub rows:      u16,
@@ -38,32 +69,98 @@ pub struct TextEditor {
 }
 
 impl TextEditor {
-    pub fn new() -> io::Result<Self> {
-        let out = stdout();
-
-        let config = Config::load()?;
+    pub fn new() -> Result<Self, Box<dyn Error>> {
+        let     out    = stdout();
+        let     config = Config::load()?;
+        let mut file   = None;
 
         let (columns, rows) = terminal::size()?;
-        let cursor_x = 0;
-        let cursor_y = 0;
+        let     cursor_x = 0;
+        let mut cursor_y = 0;
 
-        let mut lines = Vec::with_capacity(4096);
-        lines.push(String::with_capacity(256));
-        let longest_line = LongestLine::default();
+        let (lines, longest_line) = {
+            match Self::try_load_file() {
+                FileResult::Some((path, lines)) => {
+                    let longest_line = LongestLine::from(&lines)?;
+
+                    file     = Some(path);
+                    cursor_y = u16::try_from(lines.len())? - 1;
+
+                    (lines, longest_line)
+                },
+                FileResult::None => {
+                    let mut lines = Vec::with_capacity(4096);
+                    lines.push(String::with_capacity(256));
+                    let longest_line = LongestLine::default();
+
+                    (lines, longest_line)
+                },
+                FileResult::Err(string) => {
+                    return Err(string.into());
+                }
+            }
+        };
 
         Ok(Self {
-            out,
-            config,
+            out, config, file,
             columns, rows, _cursor_x: cursor_x, cursor_y,
             lines, longest_line
         })
     }
 
+    // file manipulation ///////////////////////////////////////////////////////////////
+
+    fn try_load_file() -> FileResult {
+        let args = env::args();
+
+        match args.len() {
+            0..=1 => FileResult::None,
+            2 => {
+                let path = args.last().unwrap();
+
+                match fs::read_to_string(&path) {
+                    Ok(file) => {
+                        let lines = file
+                            .lines()
+                            .map(str::to_owned)
+                            .collect();
+
+                        FileResult::Some((path, lines))
+                    },
+                    Err(err) => {
+                        match err.kind() {
+                            ErrorKind::NotFound => {
+                                error!("file `{}` does not exist", path);
+
+                                FileResult::Err(err.to_string())
+                            },
+                            ErrorKind::PermissionDenied => {
+                                error!("current user lacks read privilege to `{}`", path);
+
+                                FileResult::Err(err.to_string())
+                            },
+                            _ => {
+                                error!("std::fs::read_to_string failed to read `{}`", path);
+
+                                FileResult::Err(err.to_string())
+                            }
+                        }
+                    }
+                }
+            },
+            _ => {
+                error!("currently you can only open 1 file\n       correct usage: `cargo run` or `cargo run <FILE_PATH>`");
+
+                FileResult::Err("invalid CLI arguments".into())
+            }
+        }
+    }
+
     // terminal state //////////////////////////////////////////////////////////////////
 
-    fn prepare_terminal(&mut self) -> Result<(), Box<dyn Error>> {
+    fn prepare_terminal(&mut self) -> Result<bool, Box<dyn Error>> {
         let (x, y) = (
-            self.config.halignment.get_starting_x(self.columns),
+            self.config.halignment.get_starting_x(self)?,
             self.config.valignment.get_y(self)?
         );
 
@@ -71,7 +168,6 @@ impl TextEditor {
             self.out,
             terminal::EnterAlternateScreen,
             terminal::Clear(ClearType::FromCursorUp),
-            cursor::MoveTo(x, y),
             event::PushKeyboardEnhancementFlags(
                 KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
                 |
@@ -81,25 +177,67 @@ impl TextEditor {
             )
         )?;
 
-        terminal::enable_raw_mode()?;
+        let was_raw = {
+            if terminal::is_raw_mode_enabled()? {
+                true
+            } else {
+                terminal::enable_raw_mode()?;
 
-        Ok(())
+                false
+            }
+        };
+
+        if self.file.is_some() {
+            self.reprint_previous_lines(false)?;
+            self.cursor_y -= 1;
+        }
+
+        execute!(self.out, cursor::MoveTo(x, y))?;
+
+        Ok(was_raw)
     }
 
-    fn restore_terminal(&mut self) -> io::Result<()> {
-        terminal::disable_raw_mode()?;
-        execute!(
-            self.out,
-            event::PopKeyboardEnhancementFlags,
-            terminal::LeaveAlternateScreen
+    fn restore_terminal(was_raw: bool, out_option: Option<&mut Stdout>) -> io::Result<()> {
+        if !was_raw {
+            terminal::disable_raw_mode()?;
+        }
+
+        out_option.map_or_else(
+            || execute!(
+                io::stdout(),
+                event::PopKeyboardEnhancementFlags,
+                terminal::LeaveAlternateScreen
+            ),
+            |out| execute!(
+                out,
+                event::PopKeyboardEnhancementFlags,
+                terminal::LeaveAlternateScreen
+            )
         )
     }
 
     // main loop ///////////////////////////////////////////////////////////////////////
 
     pub fn run(mut self) -> Result<(), Box<dyn Error>> {
-        self.prepare_terminal()?;
+        let was_raw = self.prepare_terminal()?;
 
+        panic::set_hook(Box::new(move |panic_info| {
+            Self::restore_terminal(was_raw, None)
+                .expect("failed to restore terminal after panic");
+
+            eprintln!("{panic_info}");
+        }));
+
+        self.main_loop()?;
+
+        let _ = panic::take_hook();
+
+        Self::restore_terminal(was_raw, Some(&mut self.out))?;
+
+        Ok(())
+    }
+
+    fn main_loop(&mut self) -> Result<(), Box<dyn Error>> {
         loop {
             match event::read()? {
                 Event::Key(key_event) => {
@@ -147,8 +285,6 @@ impl TextEditor {
             }
         }
 
-        self.restore_terminal()?;
-
         Ok(())
     }
 
@@ -189,7 +325,7 @@ impl TextEditor {
 
         if self.config.halignment.needs_longest_line() && self.lines.len() > 1 && self.longest_line.index == y {
             self.longest_line.length -= 1;
-            self.longest_line         = self.find_longest_line()?;
+            self.longest_line         = LongestLine::from(&self.lines)?;
 
             self.reprint_previous_lines(
                 self.config.halignment == HAlignment::CenterLeft
@@ -206,8 +342,14 @@ impl TextEditor {
     }
 
     fn newline(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.lines.len() != (self.cursor_y + 1) as usize {
-            todo!();
+        {
+            let len           = self.lines.len();
+            let not_last_line = len != (self.cursor_y + 1) as usize;
+            let overflow      = len == self.rows as usize;
+
+            if not_last_line || overflow {
+                todo!();
+            }
         }
 
         self.reprint_previous_lines(false)?;
@@ -267,25 +409,6 @@ impl TextEditor {
         }
 
         Ok(())
-    }
-
-    // utils ///////////////////////////////////////////////////////////////////////////
-
-    // FIXME: this temp approach scales with file size,
-    //        so cache and sort later
-    fn find_longest_line(&self) -> Result<LongestLine, <u16 as TryFrom<usize>>::Error> {
-        let mut longest = LongestLine::default();
-
-        for i in 0..self.lines.len() {
-            let len = self.lines[i].len();
-
-            if len > longest.length as usize {
-                longest.index  = i;
-                longest.length = u16::try_from(len)?;
-            }
-        }
-
-        Ok(longest)
     }
 }
 

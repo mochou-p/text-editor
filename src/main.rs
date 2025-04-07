@@ -4,14 +4,11 @@
 
 mod config;
 mod editor;
-
-use std::error::Error;
-
-use editor::TextEditor;
+mod utils;
 
 
-fn main() -> Result<(), Box<dyn Error>> {
-    TextEditor::new()?
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    editor::TextEditor::new()?
         .run()
 }
 
