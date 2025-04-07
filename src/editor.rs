@@ -3,7 +3,7 @@
 use std::{
     convert::TryFrom,
     error::Error,
-    io::{self, ErrorKind, stdout, Stdout},
+    io::{self, ErrorKind, stdout, Stdout, Write as _},
     env, fs, panic
 };
 
@@ -156,6 +156,19 @@ impl TextEditor {
         }
     }
 
+    fn try_save_file(&self) -> io::Result<()> {
+        let Some(ref path) = self.file else { return Ok(()); };
+
+        let mut file    = fs::File::create(path)?;
+        let mut content = self.lines.join("\n");
+
+        if self.lines[self.lines.len() - 1].is_empty() {
+            content.push('\n');
+        }
+
+        file.write_all(content.as_bytes())
+    }
+
     // terminal state //////////////////////////////////////////////////////////////////
 
     fn prepare_terminal(&mut self) -> Result<bool, Box<dyn Error>> {
@@ -190,9 +203,9 @@ impl TextEditor {
         if self.file.is_some() {
             self.reprint_previous_lines(false)?;
             self.cursor_y -= 1;
+        } else {
+            execute!(self.out, cursor::MoveTo(x, y))?;
         }
-
-        execute!(self.out, cursor::MoveTo(x, y))?;
 
         Ok(was_raw)
     }
@@ -260,9 +273,9 @@ impl TextEditor {
                             continue;
                         }
 
-                        todo!();
+                        self.try_save_file()?;
 
-                        // continue;
+                        continue;
                     }
 
                     match key_event.code {
