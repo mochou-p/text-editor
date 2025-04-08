@@ -14,9 +14,11 @@ cargo run <FILE_PATH>
 ```
 3. read from a pipe
 ```bash
-echo -e "hello\nworld!!!" | cargo run
-# or
+# pipe a file
+cat <FILE_PATH> | cargo run
 cargo run < "<FILE_PATH>"
+# or the output of some other command
+echo -e "hello\nworld!!!" | cargo run
 ```
 
 # configuration

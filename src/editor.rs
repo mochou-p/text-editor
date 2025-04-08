@@ -81,7 +81,7 @@ pub struct TextEditor {
 
     pub columns:   u16,
     pub rows:      u16,
-        _cursor_x: u16,
+        cursor_x: u16,
     pub cursor_y:  u16,
 
     pub lines:        Vec<String>,
@@ -95,7 +95,6 @@ impl TextEditor {
         let mut file   = None;
 
         let (columns, rows) = terminal::size()?;
-        let     cursor_x = 0;
         let mut cursor_y = 0;
 
         // TODO: clean up
@@ -133,9 +132,11 @@ impl TextEditor {
             }
         };
 
+        let cursor_x = u16::try_from(lines[lines.len() - 1].len())?;
+
         Ok(Self {
             out, config, was_pipe, file,
-            columns, rows, _cursor_x: cursor_x, cursor_y,
+            columns, rows, cursor_x, cursor_y,
             lines, longest_line
         })
     }
@@ -324,15 +325,11 @@ impl TextEditor {
                         break;
                     }
 
-                    if key_event.kind == KeyEventKind::Release && matches!(key_event.code, KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Enter) {
+                    if key_event.kind == KeyEventKind::Release && matches!(key_event.code, KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Enter | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down) {
                         continue;
                     }
 
-                    if !key_event.modifiers.is_empty() {
-                        if !key_event.modifiers.contains(KeyModifiers::CONTROL) {
-                            continue;
-                        }
-
+                    if key_event.modifiers == KeyModifiers::CONTROL {
                         let KeyCode::Char(c) = key_event.code else { continue; };
 
                         if c != 's' {
@@ -345,15 +342,14 @@ impl TextEditor {
                     }
 
                     match key_event.code {
-                        KeyCode::Char(c) => {
-                            self.push(c)?;
-                        },
-                        KeyCode::Backspace => {
-                            self.pop()?;
-                        },
-                        KeyCode::Enter => {
-                            self.newline()?;
-                        },
+                        // FIXME: actually take kb locale modified char
+                        KeyCode::Char(c)   => { self.push(c)?;       },
+                        KeyCode::Backspace => { self.pop()?;         },
+                        KeyCode::Enter     => { self.newline()?;     },
+                        KeyCode::Left      => { self.move_x(false)?; },
+                        KeyCode::Right     => { self.move_x(true)?;  },
+                        KeyCode::Up        => { self.move_y(false)?; },
+                        KeyCode::Down      => { self.move_y(true)?;  },
                         _ => ()
                     }
                 },
@@ -370,10 +366,17 @@ impl TextEditor {
     // typing //////////////////////////////////////////////////////////////////////////
 
     fn push(&mut self, c: char) -> Result<(), Box<dyn Error>> {
-        let y    = self.cursor_y as usize;
-        let line = &mut self.lines[y];
-        line.push(c);
-        let len = line.len();
+        let     y    = self.cursor_y as usize;
+        let     line = &mut self.lines[y];
+        let mut len  = line.len();
+
+        if self.cursor_x as usize > len {
+            self.cursor_x = u16::try_from(len)?;
+        }
+
+        line.insert(self.cursor_x as usize, c);
+        len           += 1;
+        self.cursor_x += 1;
 
         if self.config.halignment.needs_longest_line() && len > self.longest_line.length as usize {
             self.longest_line.index  = y;
@@ -388,6 +391,10 @@ impl TextEditor {
         }
 
         self.reprint_current_line(false)?;
+
+        if self.cursor_x as usize != len {
+            execute!(self.out, cursor::MoveToColumn(self.cursor_x))?;
+        }
 
         Ok(())
     }
@@ -450,6 +457,89 @@ impl TextEditor {
         )?;
 
         self.reprint_current_line(false)?;
+
+        Ok(())
+    }
+
+    // cursor //////////////////////////////////////////////////////////////////////////
+
+    fn move_x(&mut self, positive: bool) -> Result<(), Box<dyn Error>> {
+        if !positive {
+            self.cursor_x = self.cursor_x
+                .min(u16::try_from(
+                    self.lines[self.cursor_y as usize].len()
+                )?);
+
+            if self.cursor_x == 0 {
+                if self.cursor_y == 0 {
+                    return Ok(());
+                }
+
+                self.cursor_y -= 1;
+                self.cursor_x  = u16::try_from(self.lines[self.cursor_y as usize].len())?;
+
+                execute!(self.out, cursor::MoveTo(self.cursor_x, self.cursor_y))?;
+
+                return Ok(());
+            }
+
+            self.cursor_x -= 1;
+
+            execute!(self.out, cursor::MoveLeft(1))?;
+
+            return Ok(());
+        }
+
+        if self.cursor_x as usize >= self.lines[self.cursor_y as usize].len() {
+            if self.cursor_y as usize == self.lines.len() - 1 {
+                return Ok(());
+            }
+
+            self.cursor_y += 1;
+            self.cursor_x  = 0;
+
+            execute!(self.out, cursor::MoveToNextLine(1))?;
+
+            return Ok(());
+        }
+
+        self.cursor_x += 1;
+
+        execute!(self.out, cursor::MoveRight(1))?;
+
+        Ok(())
+    }
+
+    fn move_y(&mut self, positive: bool) -> Result<(), Box<dyn Error>> {
+        if !positive {
+            if self.cursor_y == 0 {
+                return Ok(());
+            }
+
+            self.cursor_y -= 1;
+
+            let x = self.cursor_x
+                .min(u16::try_from(
+                    self.lines[self.cursor_y as usize].len()
+                )?);
+
+            execute!(self.out, cursor::MoveTo(x, self.cursor_y))?;
+
+            return Ok(());
+        }
+
+        if self.cursor_y as usize == self.lines.len() - 1 {
+            return Ok(());
+        }
+
+        self.cursor_y += 1;
+
+        let x = self.cursor_x
+            .min(u16::try_from(
+                self.lines[self.cursor_y as usize].len()
+            )?);
+
+        execute!(self.out, cursor::MoveTo(x, self.cursor_y))?;
 
         Ok(())
     }
