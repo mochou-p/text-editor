@@ -3,7 +3,7 @@
 use std::{
     convert::TryFrom,
     error::Error,
-    io::{self, ErrorKind, stdout, Stdout, Write as _},
+    io::{self, ErrorKind, Stdout, IsTerminal as _, Write as _},
     env, fs, panic
 };
 
@@ -47,6 +47,25 @@ impl LongestLine {
     }
 }
 
+#[derive(PartialEq)]
+enum PipeResult {
+    Some(Vec<String>),
+    None,
+    Err(String)
+}
+
+impl PipeResult {
+    fn unwrap_or_else<F>(self, f: F) -> Vec<String>
+    where
+        F: FnOnce() -> Vec<String>
+    {
+        match self {
+            Self::Some(lines) => lines,
+            _                 => f()
+        }
+    }
+}
+
 enum FileResult {
     Some((String, Vec<String>)),
     None,
@@ -55,9 +74,10 @@ enum FileResult {
 
 #[expect(clippy::module_name_repetitions)]
 pub struct TextEditor {
-    out:    Stdout,
-    config: Config,
-    file:   Option<String>,
+    out:      Stdout,
+    config:   Config,
+    was_pipe: bool,
+    file:     Option<String>,
 
     pub columns:   u16,
     pub rows:      u16,
@@ -70,7 +90,7 @@ pub struct TextEditor {
 
 impl TextEditor {
     pub fn new() -> Result<Self, Box<dyn Error>> {
-        let     out    = stdout();
+        let     out    = io::stdout();
         let     config = Config::load()?;
         let mut file   = None;
 
@@ -78,22 +98,34 @@ impl TextEditor {
         let     cursor_x = 0;
         let mut cursor_y = 0;
 
-        let (lines, longest_line) = {
-            match Self::try_load_file() {
+        // TODO: clean up
+        let (was_pipe, lines, longest_line) = {
+            let pipe = Self::try_read_pipe();
+
+            if let PipeResult::Err(string) = pipe {
+                return Err(string.into());
+            }
+
+            let was_pipe = pipe != PipeResult::None;
+
+            match Self::try_read_file(was_pipe) {
                 FileResult::Some((path, lines)) => {
                     let longest_line = LongestLine::from(&lines)?;
 
                     file     = Some(path);
                     cursor_y = u16::try_from(lines.len())? - 1;
 
-                    (lines, longest_line)
+                    (was_pipe, lines, longest_line)
                 },
                 FileResult::None => {
-                    let mut lines = Vec::with_capacity(4096);
-                    lines.push(String::with_capacity(256));
-                    let longest_line = LongestLine::default();
+                    let lines = pipe.unwrap_or_else(|| {
+                        let mut lines = Vec::with_capacity(4096);
+                        lines.push(String::with_capacity(256));
 
-                    (lines, longest_line)
+                        lines
+                    });
+
+                    (was_pipe, lines, LongestLine::default())
                 },
                 FileResult::Err(string) => {
                     return Err(string.into());
@@ -102,18 +134,52 @@ impl TextEditor {
         };
 
         Ok(Self {
-            out, config, file,
+            out, config, was_pipe, file,
             columns, rows, _cursor_x: cursor_x, cursor_y,
             lines, longest_line
         })
     }
 
-    // file manipulation ///////////////////////////////////////////////////////////////
+    // pipe ////////////////////////////////////////////////////////////////////////////
 
-    fn try_load_file() -> FileResult {
+    fn try_read_pipe() -> PipeResult {
+        let stdin = io::stdin();
+
+        if stdin.is_terminal() {
+            return PipeResult::None;
+        }
+
+        let mut lines = Vec::with_capacity(4096);
+
+        for (i, line_result) in stdin.lines().enumerate() {
+            match line_result {
+                Ok(line) => {
+                    lines.push(line);
+                },
+                Err(err) => {
+                    error!("std::io::Stdin::lines failed at line {}", i + 1);
+
+                    return PipeResult::Err(err.to_string());
+                }
+            }
+        }
+
+        PipeResult::Some(lines)
+    }
+
+    // file ////////////////////////////////////////////////////////////////////////////
+
+    fn try_read_file(pipe_present: bool) -> FileResult {
         let args = env::args();
+        let len  = args.len();
 
-        match args.len() {
+        if pipe_present && len >= 2 {
+            error!("a pipe or a filepath argument can be used, but not both");
+
+            return FileResult::Err(String::from("both pipe and file present"));
+        }
+
+        match len {
             0..=1 => FileResult::None,
             2 => {
                 let path = args.last().unwrap();
@@ -149,7 +215,7 @@ impl TextEditor {
                 }
             },
             _ => {
-                error!("currently you can only open 1 file\n       correct usage: `cargo run` or `cargo run <FILE_PATH>`");
+                error!("currently you can only open 1 file");
 
                 FileResult::Err(String::from("invalid CLI arguments"))
             }
@@ -200,7 +266,7 @@ impl TextEditor {
             }
         };
 
-        if self.file.is_some() {
+        if self.was_pipe || self.file.is_some() {
             self.reprint_previous_lines(false)?;
             self.cursor_y -= 1;
         } else {

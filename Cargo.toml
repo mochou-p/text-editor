@@ -5,7 +5,7 @@ name         = "text-editor"
 version      = "0.0.0"
 
 edition      = "2021"
-rust-version = "1.56.0"
+rust-version = "1.70.0"
 
 authors      = ["mochou-p"]
 description  = "simple text-based text editor"
