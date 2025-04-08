@@ -151,7 +151,7 @@ impl TextEditor {
             _ => {
                 error!("currently you can only open 1 file\n       correct usage: `cargo run` or `cargo run <FILE_PATH>`");
 
-                FileResult::Err("invalid CLI arguments".into())
+                FileResult::Err(String::from("invalid CLI arguments"))
             }
         }
     }
@@ -330,13 +330,22 @@ impl TextEditor {
         let y = self.cursor_y as usize;
 
         if self.lines[y].is_empty() {
-            // TODO
+            if self.lines.len() == 1 {
+                return Ok(());
+            }
+
+            self.lines.pop();
+            self.cursor_y -= 1;
+
+            let x = self.config.halignment.get_starting_x(self)?;
+            execute!(self.out, cursor::MoveTo(x, self.cursor_y))?;
+
             return Ok(());
         }
 
         self.lines[y].pop();
 
-        if self.config.halignment.needs_longest_line() && self.lines.len() > 1 && self.longest_line.index == y {
+        if self.config.halignment.needs_longest_line() && self.longest_line.index == y {
             self.longest_line.length -= 1;
             self.longest_line         = LongestLine::from(&self.lines)?;
 
