@@ -28,107 +28,10 @@ static SUBTEXT_0: &str = "166;173;200m";
 static TEXT:      &str = "205;214;244m";
 
 fn main() {
-    let mut size: winsize = unsafe { zeroed() };
-
-    if unsafe { ioctl(STDOUT_FILENO, TIOCGWINSZ, &mut size) } != 0 {
-        eprintln!(
-            "{CSI}{RED}error{CSI}{RESET}: `libc::ioctl` returned \"{}\"",
-            Error::last_os_error()
-        );
-        return;
-    }
-
-    let mut original_termios = unsafe { zeroed() };
-
-    if unsafe { tcgetattr(STDIN_FILENO, &mut original_termios) } != 0 {
-        eprintln!(
-            "{CSI}{RED}error{CSI}{RESET}: `libc::tcgetattr` returned \"{}\"",
-            Error::last_os_error()
-        );
-        return;
-    }
-
-    let mut new_termios  = original_termios;
-    new_termios.c_iflag &= !(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
-    new_termios.c_oflag &= !(OPOST);
-    new_termios.c_cflag |=   CS8;
-    new_termios.c_lflag &= !(ECHO | ICANON | IEXTEN | ISIG);
-
-    let mut stdin  = stdin();
-    let mut stdout = stdout();
-    let mut buffer = [0u8; 1];
-
-    if unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &new_termios) } != 0 {
-        eprintln!(
-            "{CSI}{RED}error{CSI}{RESET}: `libc::tcsetattr` returned \"{}\"",
-            Error::last_os_error()
-        );
-        return;
-    }
-
-    hide();
-    alternative_screen();
-    clear();
-    move_to(1, 1);
-
-    let filename = "<unnamed file>";
-    #[cfg(debug_assertions)]
-    let stamp    = format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-    #[cfg(not(debug_assertions))]
-    let stamp    = "";
-    print!(
-        "{CSI}{BG}{SURFACE_0}{CSI}{FG}{SUBTEXT_0}{filename}{}{CSI}{FG}{OVERLAY_0}{stamp}{CSI}{BG}{BASE}{CSI}{FG}{TEXT}{}",
-        " ".repeat(size.ws_col as usize - (filename.len() + stamp.len())),
-        " ".repeat((size.ws_col * (size.ws_row - 1)) as usize)
+    Editor::default().and_or(
+        Editor::run,
+        |error| eprintln!("{CSI}{RED}error{CSI}{RESET}: {error}")
     );
-
-    move_to(1, 2);
-    show();
-
-    loop {
-        let _ = stdout.flush();
-
-        match stdin.read_exact(&mut buffer) {
-            Ok(()) => {
-                if unsafe { iscntrl(i32::from(buffer[0])) } == 0 {
-                    print!("{}", char::from(buffer[0]));
-                } else {
-                    match buffer[0] {
-                        13 => {  // CR
-                            move_down(1);
-                            let _ = stdout.flush();
-                        },
-                        27 => {  // Escape
-                            // TODO: also other stuff report 27,
-                            //       like the start of sequences
-                            //       for PageUp/Delete/...
-                            break;
-                        },
-                        127 => {  // Backspace
-                            // TODO: check if there even is something to erase
-                            move_left(1);
-                            clear_to_end();
-                            let _ = stdout.flush();
-                        },
-                        _ => {
-                            #[cfg(debug_assertions)]
-                            print!("{CSI}{FG}{SURFACE_1}[{}]{CSI}{RESET}", buffer[0]);
-                        }
-                    }
-                }
-            },
-            Err(err) => {
-                normal_screen();
-                unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios) };
-                eprintln!("{CSI}{RED}error{CSI}{RESET}: `Stdin::read_exact returned \"{err}\"");
-                return;
-            }
-        }
-    }
-
-    print!("{CSI}{RESET}");
-    normal_screen();
-    unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios) };
 }
 
 fn show()                  { print!("{CSI}?25h");     }
@@ -140,4 +43,134 @@ fn clear()                 { print!("{CSI}2J");       }
 fn move_to(x: u16, y: u16) { print!("{CSI}{y};{x}H"); }
 fn move_left(d: u16)       { print!("{CSI}{d}D");     }
 fn move_down(d: u16)       { print!("{CSI}{d}E");     }
+
+enum EditorResult {
+    Ok(Editor),
+    Err(String)
+}
+
+impl EditorResult {
+    fn and_or(self, ok_f: impl FnOnce(Editor), err_f: impl FnOnce(String)) {
+        match self {
+            Self::Ok(editor) =>  ok_f(editor),
+            Self::Err(error) => err_f(error)
+        }
+    }
+}
+
+struct Editor {
+    size: winsize
+}
+
+impl Editor {
+    fn default() -> EditorResult {
+        let mut size: winsize = unsafe { zeroed() };
+
+        if unsafe { ioctl(STDOUT_FILENO, TIOCGWINSZ, &mut size) } != 0 {
+            return EditorResult::Err(
+                format!(
+                    "`libc::ioctl` returned \"{}\"",
+                    Error::last_os_error()
+                )
+            );
+        }
+
+
+        EditorResult::Ok(Self { size })
+    }
+
+    fn run(self) {
+        let mut original_termios = unsafe { zeroed() };
+
+        if unsafe { tcgetattr(STDIN_FILENO, &mut original_termios) } != 0 {
+            eprintln!(
+                "{CSI}{RED}error{CSI}{RESET}: `libc::tcgetattr` returned \"{}\"",
+                Error::last_os_error()
+            );
+            return;
+        }
+
+        let mut new_termios  = original_termios;
+        new_termios.c_iflag &= !(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+        new_termios.c_oflag &= !(OPOST);
+        new_termios.c_cflag |=   CS8;
+        new_termios.c_lflag &= !(ECHO | ICANON | IEXTEN | ISIG);
+
+        let mut stdin  = stdin();
+        let mut stdout = stdout();
+        let mut buffer = [0u8; 1];
+
+        if unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &new_termios) } != 0 {
+            eprintln!(
+                "{CSI}{RED}error{CSI}{RESET}: `libc::tcsetattr` returned \"{}\"",
+                Error::last_os_error()
+            );
+            return;
+        }
+
+        hide();
+        alternative_screen();
+        clear();
+        move_to(1, 1);
+
+        let filename = "<unnamed file>";
+        #[cfg(debug_assertions)]
+        let stamp    = format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        #[cfg(not(debug_assertions))]
+        let stamp    = "";
+        print!(
+            "{CSI}{BG}{SURFACE_0}{CSI}{FG}{SUBTEXT_0}{filename}{}{CSI}{FG}{OVERLAY_0}{stamp}{CSI}{BG}{BASE}{CSI}{FG}{TEXT}{}",
+            " ".repeat(self.size.ws_col as usize - (filename.len() + stamp.len())),
+            " ".repeat((self.size.ws_col * (self.size.ws_row - 1)) as usize)
+        );
+
+        move_to(1, 2);
+        show();
+
+        loop {
+            let _ = stdout.flush();
+
+            match stdin.read_exact(&mut buffer) {
+                Ok(()) => {
+                    if unsafe { iscntrl(i32::from(buffer[0])) } == 0 {
+                        print!("{}", char::from(buffer[0]));
+                    } else {
+                        match buffer[0] {
+                            13 => {  // CR
+                                move_down(1);
+                                let _ = stdout.flush();
+                            },
+                            27 => {  // Escape
+                                // TODO: also other stuff report 27,
+                                //       like the start of sequences
+                                //       for PageUp/Delete/...
+                                break;
+                            },
+                            127 => {  // Backspace
+                                // TODO: check if there even is something to erase
+                                move_left(1);
+                                clear_to_end();
+                                let _ = stdout.flush();
+                            },
+                            _ => {
+                                #[cfg(debug_assertions)]
+                                print!("{CSI}{FG}{SURFACE_1}[{}]{CSI}{RESET}", buffer[0]);
+                            }
+                        }
+                    }
+                },
+                Err(err) => {
+                    normal_screen();
+                    unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios) };
+                    eprintln!("{CSI}{RED}error{CSI}{RESET}: `Stdin::read_exact returned \"{err}\"");
+                    return;
+                }
+            }
+        }
+
+        print!("{CSI}{RESET}");
+        normal_screen();
+        unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios) };
+    }
+}
 
