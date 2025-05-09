@@ -17,11 +17,11 @@ keywords     = ["text-editor", "text-based"]
 categories   = ["text-editors", "command-line-utilities", "development-tools", "filesystem"]
 
 [dependencies]
-crossterm = { version = "0.28.1", default-features = false, features = ["events"] }
+libc = "0.2.172"
 
 [lints.clippy]
 all      = "forbid"
-pedantic = "deny"
+pedantic = "forbid"
 nursery  = "forbid"
-cargo    = "deny"
+cargo    = "forbid"
 
