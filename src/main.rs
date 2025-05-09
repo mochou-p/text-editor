@@ -16,9 +16,14 @@ static CSI: &str = "\x1b[";
 static FG: &str = "38;2;";
 static BG: &str = "48;2;";
 
+static RESET: &str = "0m";
+static RED:   &str = "31m";
+
 // Catppuccin Mocha
 static BASE:      &str = "30;30;46m";
 static SURFACE_0: &str = "49;50;68m";
+static SURFACE_1: &str = "69;71;90m";
+static OVERLAY_0: &str = "108;112;134m";
 static SUBTEXT_0: &str = "166;173;200m";
 static TEXT:      &str = "205;214;244m";
 
@@ -27,7 +32,7 @@ fn main() {
 
     if unsafe { ioctl(STDOUT_FILENO, TIOCGWINSZ, &mut size) } != 0 {
         eprintln!(
-            "{CSI}31merror{CSI}0m: `libc::ioctl` returned \"{}\"",
+            "{CSI}{RED}error{CSI}{RESET}: `libc::ioctl` returned \"{}\"",
             Error::last_os_error()
         );
         return;
@@ -37,7 +42,7 @@ fn main() {
 
     if unsafe { tcgetattr(STDIN_FILENO, &mut original_termios) } != 0 {
         eprintln!(
-            "{CSI}31merror{CSI}0m: `libc::tcgetattr` returned \"{}\"",
+            "{CSI}{RED}error{CSI}{RESET}: `libc::tcgetattr` returned \"{}\"",
             Error::last_os_error()
         );
         return;
@@ -55,7 +60,7 @@ fn main() {
 
     if unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &new_termios) } != 0 {
         eprintln!(
-            "{CSI}31merror{CSI}0m: `libc::tcsetattr` returned \"{}\"",
+            "{CSI}{RED}error{CSI}{RESET}: `libc::tcsetattr` returned \"{}\"",
             Error::last_os_error()
         );
         return;
@@ -67,9 +72,12 @@ fn main() {
     move_to(1, 1);
 
     let filename = "<unnamed file>";
+    #[cfg(debug_assertions)]
     let stamp    = format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+    #[cfg(not(debug_assertions))]
+    let stamp    = "";
     print!(
-        "{CSI}{BG}{SURFACE_0}{CSI}{FG}{SUBTEXT_0}{filename}{}{stamp}{CSI}{BG}{BASE}{CSI}{FG}{TEXT}{}",
+        "{CSI}{BG}{SURFACE_0}{CSI}{FG}{SUBTEXT_0}{filename}{}{CSI}{FG}{OVERLAY_0}{stamp}{CSI}{BG}{BASE}{CSI}{FG}{TEXT}{}",
         " ".repeat(size.ws_col as usize - (filename.len() + stamp.len())),
         " ".repeat((size.ws_col * (size.ws_row - 1)) as usize)
     );
@@ -103,7 +111,8 @@ fn main() {
                             let _ = stdout.flush();
                         },
                         _ => {
-                            print!("{CSI}30m[{}]{CSI}0m", buffer[0]);
+                            #[cfg(debug_assertions)]
+                            print!("{CSI}{FG}{SURFACE_1}[{}]{CSI}{RESET}", buffer[0]);
                         }
                     }
                 }
@@ -111,13 +120,13 @@ fn main() {
             Err(err) => {
                 normal_screen();
                 unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios) };
-                eprintln!("{CSI}31merror{CSI}0m: `Stdin::read_exact returned \"{err}\"");
+                eprintln!("{CSI}{RED}error{CSI}{RESET}: `Stdin::read_exact returned \"{err}\"");
                 return;
             }
         }
     }
 
-    print!("{CSI}0m");
+    print!("{CSI}{RESET}");
     normal_screen();
     unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios) };
 }
