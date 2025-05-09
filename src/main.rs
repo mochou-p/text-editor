@@ -20,9 +20,12 @@ static RESET: &str = "0m";
 static RED:   &str = "31m";
 
 // Catppuccin Mocha
+static MANTLE:    &str = "24;24;37m";
 static BASE:      &str = "30;30;46m";
 static SURFACE_0: &str = "49;50;68m";
+#[cfg(debug_assertions)]
 static SURFACE_1: &str = "69;71;90m";
+#[cfg(debug_assertions)]
 static OVERLAY_0: &str = "108;112;134m";
 static SUBTEXT_0: &str = "166;173;200m";
 static TEXT:      &str = "205;214;244m";
@@ -33,16 +36,6 @@ fn main() {
         |error| eprintln!("{CSI}{RED}error{CSI}{RESET}: {error}")
     );
 }
-
-fn show()                  { print!("{CSI}?25h");     }
-fn hide()                  { print!("{CSI}?25l");     }
-fn alternative_screen()    { print!("{CSI}?1049h");   }
-fn normal_screen()         { print!("{CSI}?1049l");   }
-fn clear_to_end()          { print!("{CSI}0J");       }
-fn clear()                 { print!("{CSI}2J");       }
-fn move_to(x: u16, y: u16) { print!("{CSI}{y};{x}H"); }
-fn move_left(d: u16)       { print!("{CSI}{d}D");     }
-fn move_down(d: u16)       { print!("{CSI}{d}E");     }
 
 enum EditorResult {
     Ok(Editor),
@@ -111,18 +104,10 @@ impl Editor {
         hide();
         alternative_screen();
         clear();
-        move_to(1, 1);
 
-        let filename = "<unnamed file>";
-        #[cfg(debug_assertions)]
-        let stamp    = format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-        #[cfg(not(debug_assertions))]
-        let stamp    = "";
-        print!(
-            "{CSI}{BG}{SURFACE_0}{CSI}{FG}{SUBTEXT_0}{filename}{}{CSI}{FG}{OVERLAY_0}{stamp}{CSI}{BG}{BASE}{CSI}{FG}{TEXT}{}",
-            " ".repeat(self.size.ws_col as usize - (filename.len() + stamp.len())),
-            " ".repeat((self.size.ws_col * (self.size.ws_row - 1)) as usize)
-        );
+        move_to(1, 1);
+        self.header();
+        self.text_area();
 
         move_to(1, 2);
         show();
@@ -138,6 +123,7 @@ impl Editor {
                         match buffer[0] {
                             13 => {  // CR
                                 move_down(1);
+                                self.text_line();
                                 let _ = stdout.flush();
                             },
                             27 => {  // Escape
@@ -149,7 +135,8 @@ impl Editor {
                             127 => {  // Backspace
                                 // TODO: check if there even is something to erase
                                 move_left(1);
-                                clear_to_end();
+                                print!(" ");
+                                move_left(1);
                                 let _ = stdout.flush();
                             },
                             _ => {
@@ -172,5 +159,50 @@ impl Editor {
         normal_screen();
         unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios) };
     }
+
+    fn header(&self) {
+        let filename = "<unnamed file>";
+
+        #[cfg(debug_assertions)]
+        {
+            let stamp = format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+            print!(
+                "{CSI}{BG}{SURFACE_0}{CSI}{FG}{SUBTEXT_0}{filename}{}{CSI}{FG}{OVERLAY_0}{stamp}",
+                " ".repeat(self.size.ws_col as usize - (filename.len() + stamp.len()))
+            );
+        }
+
+        #[cfg(not(debug_assertions))]
+        print!(
+            "{CSI}{BG}{SURFACE_0}{CSI}{FG}{SUBTEXT_0}{filename}{}",
+            " ".repeat(self.size.ws_col as usize - filename.len()),
+        );
+    }
+
+    fn text_line(&self) {
+        print!(
+            "{CSI}{BG}{BASE}{}",
+            " ".repeat(self.size.ws_col as usize)
+        );
+        move_to_line_start();
+    }
+
+    fn text_area(&self) {
+        print!(
+            "{CSI}{BG}{BASE}{}{CSI}{BG}{MANTLE}{}{CSI}{BG}{BASE}{CSI}{FG}{TEXT}",
+            " ".repeat(self.size.ws_col as usize),
+            " ".repeat((self.size.ws_col * (self.size.ws_row - 2)) as usize)
+        );
+    }
 }
+
+fn show()                  { print!("{CSI}?25h");     }
+fn hide()                  { print!("{CSI}?25l");     }
+fn alternative_screen()    { print!("{CSI}?1049h");   }
+fn normal_screen()         { print!("{CSI}?1049l");   }
+fn clear()                 { print!("{CSI}2J");       }
+fn move_to_line_start()    { print!("{CSI}1G");       }
+fn move_to(x: u16, y: u16) { print!("{CSI}{y};{x}H"); }
+fn move_left(d: u16)       { print!("{CSI}{d}D");     }
+fn move_down(d: u16)       { print!("{CSI}{d}E");     }
 
