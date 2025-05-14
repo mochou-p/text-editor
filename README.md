@@ -3,6 +3,10 @@
 # text editor
 simple text-based text editor
 
+## notes
+> [!WARNING]
+> the [UTF-8 charset](https://en.wikipedia.org/wiki/UTF-8) is currently not supported, use only [ASCII](https://en.wikipedia.org/wiki/ASCII)
+
 ## License
 Licensed under either of
  * Apache License, Version 2.0  

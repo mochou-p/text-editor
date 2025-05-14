@@ -1,8 +1,8 @@
 // text-editor/src/main.rs
 
 use libc::{
-    ioctl, iscntrl, tcgetattr, tcsetattr, winsize,
-    BRKINT, CS8, ECHO, ICANON, ICRNL, IEXTEN, INPCK, ISIG, ISTRIP, IXON, OPOST, STDIN_FILENO, STDOUT_FILENO, TCSAFLUSH, TIOCGWINSZ
+    fcntl, ioctl, iscntrl, tcgetattr, tcsetattr, winsize,
+    BRKINT, CS8, ECHO, F_GETFL, F_SETFL, ICANON, ICRNL, IEXTEN, INPCK, ISIG, ISTRIP, IXON, O_NONBLOCK, OPOST, STDIN_FILENO, STDOUT_FILENO, TCSAFLUSH, TIOCGWINSZ
 };
 
 use std::{
@@ -51,8 +51,15 @@ impl EditorResult {
     }
 }
 
+struct Cursor {
+    x: usize,
+    y: usize
+}
+
 struct Editor {
-    size: winsize
+    cursor: Cursor,
+    size:   winsize,
+    lines:  Vec<String>
 }
 
 impl Editor {
@@ -68,14 +75,18 @@ impl Editor {
             );
         }
 
+        let cursor    = Cursor { x: 0, y: 0 };
+        let mut lines = Vec::with_capacity(2048);
+        lines.push(String::with_capacity(256));
 
-        EditorResult::Ok(Self { size })
+        EditorResult::Ok(Self { cursor, size, lines })
     }
 
-    fn run(self) {
+    #[expect(clippy::too_many_lines, reason = "temp")]
+    fn run(mut self) {
         let mut original_termios = unsafe { zeroed() };
 
-        if unsafe { tcgetattr(STDIN_FILENO, &mut original_termios) } != 0 {
+        if unsafe { tcgetattr(STDIN_FILENO, &raw mut original_termios) } != 0 {
             eprintln!(
                 "{CSI}{RED}error{CSI}{RESET}: `libc::tcgetattr` returned \"{}\"",
                 Error::last_os_error()
@@ -92,8 +103,9 @@ impl Editor {
         let mut stdin  = stdin();
         let mut stdout = stdout();
         let mut buffer = [0u8; 1];
+        let mut idklol = [0u8; 2];
 
-        if unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &new_termios) } != 0 {
+        if unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const new_termios) } != 0 {
             eprintln!(
                 "{CSI}{RED}error{CSI}{RESET}: `libc::tcsetattr` returned \"{}\"",
                 Error::last_os_error()
@@ -118,26 +130,105 @@ impl Editor {
             match stdin.read_exact(&mut buffer) {
                 Ok(()) => {
                     if unsafe { iscntrl(i32::from(buffer[0])) } == 0 {
-                        print!("{}", char::from(buffer[0]));
+                        let c = char::from(buffer[0]);
+                        print!("{c}");
+                        self.lines[self.cursor.y].insert(self.cursor.x, c);
+                        self.cursor.x += 1;
+
+                        if self.cursor.x < self.lines[self.cursor.y].len() {
+                            print!("{}", &self.lines[self.cursor.y][self.cursor.x..]);
+                            move_to_x(self.cursor.x + 1);
+                        }
                     } else {
                         match buffer[0] {
-                            13 => {  // CR
-                                move_down(1);
-                                self.text_line();
-                                let _ = stdout.flush();
+                            13 => {  // Enter
+                                self.cursor.y += 1;
+                                self.lines.insert(self.cursor.y, String::with_capacity(256));
+
+                                if self.cursor.x < self.lines[self.cursor.y - 1].len() {
+                                    print!("{CSI}0K");
+                                    let remainder = self.lines[self.cursor.y - 1].drain(self.cursor.x..).collect::<String>();
+                                    self.lines[self.cursor.y].push_str(&remainder);
+                                }
+
+                                move_to_next_line(1);
+                                self.cursor.x = 0;
+                                print!("{}", self.lines[self.cursor.y]);
+                                self.line_background();
                             },
-                            27 => {  // Escape
-                                // TODO: also other stuff report 27,
-                                //       like the start of sequences
-                                //       for PageUp/Delete/...
-                                break;
+                            27 => {
+                                if !Self::try_read_special(&mut idklol) {  // Escape
+                                    break;
+                                }
+
+                                match idklol[1] {
+                                    65 => {  // ArrowUp/ScrollUp
+                                        if self.cursor.y == 0 {
+                                            continue;
+                                        }
+
+                                        print!("{CSI}1A");
+                                        self.cursor.y -= 1;
+                                    },
+                                    66 => {  // ArrowDown/ScrollDown
+                                        if self.cursor.y == self.lines.len() - 1 {
+                                            continue;
+                                        }
+
+                                        print!("{CSI}1B");
+                                        self.cursor.y += 1;
+                                    },
+                                    67 => {  // ArrowRight
+                                        if self.cursor.x == self.lines[self.cursor.y].len() {
+                                            if self.cursor.y < self.lines.len() - 1 {
+                                                move_to_next_line(1);
+                                                self.cursor.x  = 0;
+                                                self.cursor.y += 1;
+                                            }
+
+                                            continue;
+                                        }
+
+                                        print!("{CSI}1C");
+                                        self.cursor.x += 1;
+                                    },
+                                    68 => {  // ArrowLeft
+                                        if self.cursor.x == 0 {
+                                            if self.cursor.y != 0 {
+                                                self.cursor.y -= 1;
+                                                self.cursor.x  = self.lines[self.cursor.y].len();
+                                                move_to(self.cursor.x + 1, self.cursor.y + 2);
+                                            }
+
+                                            continue;
+                                        }
+
+                                        print!("{CSI}1D");
+                                        self.cursor.x -= 1;
+                                    },
+                                    _ => ()
+                                }
                             },
                             127 => {  // Backspace
-                                // TODO: check if there even is something to erase
-                                move_left(1);
-                                print!(" ");
-                                move_left(1);
-                                let _ = stdout.flush();
+                                if self.cursor.x == 0 {
+                                    if self.cursor.y == 0 {
+                                        continue;
+                                    }
+
+                                    return;
+                                } else if self.cursor.x == self.lines[self.cursor.y].len() {
+                                    move_left(1);
+                                    print!(" ");
+                                    move_left(1);
+                                    self.lines[self.cursor.y].pop();
+                                    self.cursor.x -= 1;
+                                } else {
+                                    move_left(1);
+                                    print!("{} ", &self.lines[self.cursor.y][self.cursor.x..]);
+                                    move_to_x(self.cursor.x);
+                                    self.cursor.x -= 1;
+                                    self.lines[self.cursor.y].remove(self.cursor.x);
+                                }
                             },
                             _ => {
                                 #[cfg(debug_assertions)]
@@ -148,7 +239,7 @@ impl Editor {
                 },
                 Err(err) => {
                     normal_screen();
-                    unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios) };
+                    unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
                     eprintln!("{CSI}{RED}error{CSI}{RESET}: `Stdin::read_exact returned \"{err}\"");
                     return;
                 }
@@ -157,7 +248,32 @@ impl Editor {
 
         print!("{CSI}{RESET}");
         normal_screen();
-        unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios) };
+        unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
+
+        #[cfg(debug_assertions)]
+        for line in self.lines {
+            println!("{line}");
+        }
+    }
+
+    fn try_read_special(buf: &mut [u8; 2]) -> bool {
+        let flags = unsafe { fcntl(STDIN_FILENO, F_GETFL) };
+        if flags == -1 {
+            return false;
+        }
+
+        let new_flags = flags | O_NONBLOCK;
+        if unsafe { fcntl(STDOUT_FILENO, F_SETFL, new_flags) } == -1 {
+            return false;
+        }
+
+        let ret = stdin().read(buf).is_ok();
+
+        if unsafe { fcntl(STDOUT_FILENO, F_SETFL, flags) } == -1 {
+            return false;
+        }
+
+        ret
     }
 
     fn header(&self) {
@@ -179,10 +295,10 @@ impl Editor {
         );
     }
 
-    fn text_line(&self) {
+    fn line_background(&self) {
         print!(
             "{CSI}{BG}{BASE}{}",
-            " ".repeat(self.size.ws_col as usize)
+            " ".repeat(self.size.ws_col as usize - self.lines[self.cursor.y].len())
         );
         move_to_line_start();
     }
@@ -196,13 +312,14 @@ impl Editor {
     }
 }
 
-fn show()                  { print!("{CSI}?25h");     }
-fn hide()                  { print!("{CSI}?25l");     }
-fn alternative_screen()    { print!("{CSI}?1049h");   }
-fn normal_screen()         { print!("{CSI}?1049l");   }
-fn clear()                 { print!("{CSI}2J");       }
-fn move_to_line_start()    { print!("{CSI}1G");       }
-fn move_to(x: u16, y: u16) { print!("{CSI}{y};{x}H"); }
-fn move_left(d: u16)       { print!("{CSI}{d}D");     }
-fn move_down(d: u16)       { print!("{CSI}{d}E");     }
+fn show()                      { print!("{CSI}?25h");     }
+fn hide()                      { print!("{CSI}?25l");     }
+fn alternative_screen()        { print!("{CSI}?1049h");   }
+fn normal_screen()             { print!("{CSI}?1049l");   }
+fn clear()                     { print!("{CSI}2J");       }
+fn move_to_line_start()        { print!("{CSI}1G");       }
+fn move_to(x: usize, y: usize) { print!("{CSI}{y};{x}H"); }
+fn move_to_x(p: usize)         { print!("{CSI}{p}G");     }
+fn move_left(d: usize)         { print!("{CSI}{d}D");     }
+fn move_to_next_line(d: usize) { print!("{CSI}{d}E");     }
 
