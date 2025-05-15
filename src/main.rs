@@ -125,12 +125,57 @@ impl Editor {
         move_to(1, 2);
         show();
 
+        // i will clean this up one day
         loop {
             let _ = stdout.flush();
 
             match stdin.read_exact(&mut buffer) {
                 Ok(()) => {
                     if unsafe { iscntrl(i32::from(buffer[0])) } == 0 {
+                        if buffer[0] == 59 && Self::try_read_special(&mut idklol) {
+                            match idklol[1] {
+                                67 => {  // ArrowRight
+                                    let len = self.lines[self.cursor.y].len();
+                                    if self.cursor.x == len {
+                                        if self.cursor.y != self.lines.len() - 1 {
+                                            self.cursor.x  = 0;
+                                            self.cursor.y += 1;
+                                            self.update_cursor();
+                                        }
+                                    } else {
+                                        if let Some(i) = self.lines[self.cursor.y][self.cursor.x + 1..].find(char::is_whitespace) {
+                                            self.cursor.x += i + 1;
+                                        } else {
+                                            self.cursor.x = len;
+                                        }
+
+                                        self.update_cursor();
+                                    }
+                                },
+                                68 => {  // ArrowLeft
+                                    if self.cursor.x == 0 {
+                                        if self.cursor.y != 0 {
+                                            self.cursor.y -= 1;
+                                            self.cursor.x  = self.lines[self.cursor.y].len();
+                                            self.update_cursor();
+                                        }
+                                    } else {
+                                        if let Some(i) = self.lines[self.cursor.y][..self.cursor.x - 1].rfind(char::is_whitespace) {
+                                            self.cursor.x = i + 1;
+                                        } else {
+                                            self.cursor.x = 0;
+                                        }
+
+                                        self.update_cursor();
+                                    }
+                                },
+                                _ => ()
+                            }
+
+                            self.cursor.last_x = self.cursor.x;
+                            continue;
+                        }
+
                         let c = char::from(buffer[0]);
                         print!("{c}");
                         self.lines[self.cursor.y].insert(self.cursor.x, c);
@@ -170,6 +215,12 @@ impl Editor {
                                 match idklol[1] {
                                     65 => {  // ArrowUp/ScrollUp
                                         if self.cursor.y == 0 {
+                                            if self.cursor.x != 0 {
+                                                self.cursor.x = 0;
+                                                move_to_x(0);
+                                            }
+
+                                            self.cursor.last_x = self.cursor.x;
                                             continue;
                                         }
 
@@ -188,6 +239,13 @@ impl Editor {
                                     },
                                     66 => {  // ArrowDown/ScrollDown
                                         if self.cursor.y == self.lines.len() - 1 {
+                                            let len = self.lines[self.cursor.y].len();
+                                            if self.cursor.x != len {
+                                                self.cursor.x = len;
+                                                move_to_x(self.cursor.x + 1);
+                                            }
+
+                                            self.cursor.last_x = self.cursor.x;
                                             continue;
                                         }
 
