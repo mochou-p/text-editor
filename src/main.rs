@@ -19,7 +19,7 @@ static BG: &str = "48;2;";
 static RESET: &str = "0m";
 static RED:   &str = "31m";
 
-// Catppuccin Mocha
+// Catppuccin Mocha (https://github.com/catppuccin/catppuccin)
 static MANTLE:    &str = "24;24;37m";
 static BASE:      &str = "30;30;46m";
 static SURFACE_0: &str = "49;50;68m";
@@ -153,8 +153,9 @@ impl Editor {
 
                                 move_to_next_line(1);
                                 self.cursor.x = 0;
-                                print!("{}", self.lines[self.cursor.y]);
-                                self.line_background();
+                                print!("{}", self.lines[self.cursor.y..].join(&format!("{CSI}0K{CSI}1E")));
+                                self.line_background(true);
+                                move_to(self.cursor.x + 1, self.cursor.y + 2);
                             },
                             27 => {
                                 if !Self::try_read_special(&mut idklol) {  // Escape
@@ -215,7 +216,35 @@ impl Editor {
                                         continue;
                                     }
 
-                                    return;
+                                    if self.lines[self.cursor.y].is_empty() {
+                                        self.lines.remove(self.cursor.y);
+
+                                        print!("{}", self.lines[self.cursor.y..].join(&format!("{CSI}0K{CSI}1E")));
+                                        if self.cursor.y != self.lines.len() {
+                                            print!("{CSI}0K{CSI}1E");
+                                        }
+
+                                        self.line_background(false);
+                                        self.cursor.y -= 1;
+                                        self.cursor.x  = self.lines[self.cursor.y].len();
+                                        move_to(self.cursor.x + 1, self.cursor.y + 2);
+                                    } else {
+                                        let len  = self.lines[self.cursor.y - 1].len();
+                                        let line = self.lines.remove(self.cursor.y);
+                                        self.lines[self.cursor.y - 1].push_str(&line);
+
+                                        print!("{}", self.lines[self.cursor.y..].join(&format!("{CSI}0K{CSI}1E")));
+                                        if self.cursor.y != self.lines.len() {
+                                            print!("{CSI}0K{CSI}1E");
+                                        }
+
+                                        self.line_background(false);
+                                        self.cursor.y -= 1;
+                                        move_to(len + 1, self.cursor.y + 2);
+                                        print!("{line}");
+                                        move_to(len + 1, self.cursor.y + 2);
+                                        self.cursor.x = len;
+                                    }
                                 } else if self.cursor.x == self.lines[self.cursor.y].len() {
                                     move_left(1);
                                     print!(" ");
@@ -281,7 +310,7 @@ impl Editor {
 
         #[cfg(debug_assertions)]
         {
-            let stamp = format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+            let stamp = format!("{}/{} {}", env!("CARGO_PKG_AUTHORS"), env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
             print!(
                 "{CSI}{BG}{SURFACE_0}{CSI}{FG}{SUBTEXT_0}{filename}{}{CSI}{FG}{OVERLAY_0}{stamp}",
                 " ".repeat(self.size.ws_col as usize - (filename.len() + stamp.len()))
@@ -295,12 +324,21 @@ impl Editor {
         );
     }
 
-    fn line_background(&self) {
+    fn line_background(&self, is_real: bool) {
         print!(
-            "{CSI}{BG}{BASE}{}",
-            " ".repeat(self.size.ws_col as usize - self.lines[self.cursor.y].len())
+            "{CSI}{BG}{}{}",
+            if is_real { BASE } else { MANTLE },
+            " ".repeat(
+                if is_real {
+                    self.size.ws_col as usize - self.lines[self.lines.len() - 1].len()
+                } else {
+                    self.size.ws_col as usize
+                }
+            )
         );
-        move_to_line_start();
+        if !is_real {
+            print!("{CSI}{BG}{BASE}");
+        }
     }
 
     fn text_area(&self) {
@@ -317,7 +355,6 @@ fn hide()                      { print!("{CSI}?25l");     }
 fn alternative_screen()        { print!("{CSI}?1049h");   }
 fn normal_screen()             { print!("{CSI}?1049l");   }
 fn clear()                     { print!("{CSI}2J");       }
-fn move_to_line_start()        { print!("{CSI}1G");       }
 fn move_to(x: usize, y: usize) { print!("{CSI}{y};{x}H"); }
 fn move_to_x(p: usize)         { print!("{CSI}{p}G");     }
 fn move_left(d: usize)         { print!("{CSI}{d}D");     }
