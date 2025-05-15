@@ -52,8 +52,9 @@ impl EditorResult {
 }
 
 struct Cursor {
-    x: usize,
-    y: usize
+    last_x: usize,
+    x:      usize,
+    y:      usize
 }
 
 struct Editor {
@@ -75,14 +76,14 @@ impl Editor {
             );
         }
 
-        let cursor    = Cursor { x: 0, y: 0 };
+        let cursor    = Cursor { last_x: 0, x: 0, y: 0 };
         let mut lines = Vec::with_capacity(2048);
         lines.push(String::with_capacity(256));
 
         EditorResult::Ok(Self { cursor, size, lines })
     }
 
-    #[expect(clippy::too_many_lines, reason = "temp")]
+    #[expect(clippy::too_many_lines, clippy::cognitive_complexity, reason = "temp")]
     fn run(mut self) {
         let mut original_termios = unsafe { zeroed() };
 
@@ -139,6 +140,8 @@ impl Editor {
                             print!("{}", &self.lines[self.cursor.y][self.cursor.x..]);
                             move_to_x(self.cursor.x + 1);
                         }
+
+                        self.cursor.last_x = self.cursor.x;
                     } else {
                         match buffer[0] {
                             13 => {  // Enter
@@ -155,7 +158,9 @@ impl Editor {
                                 self.cursor.x = 0;
                                 print!("{}", self.lines[self.cursor.y..].join(&format!("{CSI}0K{CSI}1E")));
                                 self.line_background(true);
-                                move_to(self.cursor.x + 1, self.cursor.y + 2);
+                                self.update_cursor();
+
+                                self.cursor.last_x = self.cursor.x;
                             },
                             27 => {
                                 if !Self::try_read_special(&mut idklol) {  // Escape
@@ -168,16 +173,36 @@ impl Editor {
                                             continue;
                                         }
 
-                                        print!("{CSI}1A");
                                         self.cursor.y -= 1;
+                                        let len = self.lines[self.cursor.y].len();
+                                        if self.cursor.last_x > self.cursor.x {
+                                            self.cursor.x = self.cursor.last_x.min(len);
+                                            self.update_cursor();
+                                        } else if self.cursor.x > len {
+                                            self.cursor.last_x = self.cursor.x;
+                                            self.cursor.x      = len;
+                                            self.update_cursor();
+                                        } else {
+                                            print!("{CSI}1A");
+                                        }
                                     },
                                     66 => {  // ArrowDown/ScrollDown
                                         if self.cursor.y == self.lines.len() - 1 {
                                             continue;
                                         }
 
-                                        print!("{CSI}1B");
                                         self.cursor.y += 1;
+                                        let len = self.lines[self.cursor.y].len();
+                                        if self.cursor.last_x > self.cursor.x {
+                                            self.cursor.x = self.cursor.last_x.min(len);
+                                            self.update_cursor();
+                                        } else if self.cursor.x > len {
+                                            self.cursor.last_x = self.cursor.x;
+                                            self.cursor.x      = len;
+                                            self.update_cursor();
+                                        } else {
+                                            print!("{CSI}1B");
+                                        }
                                     },
                                     67 => {  // ArrowRight
                                         if self.cursor.x == self.lines[self.cursor.y].len() {
@@ -186,26 +211,26 @@ impl Editor {
                                                 self.cursor.x  = 0;
                                                 self.cursor.y += 1;
                                             }
-
-                                            continue;
+                                        } else {
+                                            print!("{CSI}1C");
+                                            self.cursor.x += 1;
                                         }
 
-                                        print!("{CSI}1C");
-                                        self.cursor.x += 1;
+                                        self.cursor.last_x = self.cursor.x;
                                     },
                                     68 => {  // ArrowLeft
                                         if self.cursor.x == 0 {
                                             if self.cursor.y != 0 {
                                                 self.cursor.y -= 1;
                                                 self.cursor.x  = self.lines[self.cursor.y].len();
-                                                move_to(self.cursor.x + 1, self.cursor.y + 2);
+                                                self.update_cursor();
                                             }
-
-                                            continue;
+                                        } else {
+                                            print!("{CSI}1D");
+                                            self.cursor.x -= 1;
                                         }
 
-                                        print!("{CSI}1D");
-                                        self.cursor.x -= 1;
+                                        self.cursor.last_x = self.cursor.x;
                                     },
                                     _ => ()
                                 }
@@ -213,6 +238,7 @@ impl Editor {
                             127 => {  // Backspace
                                 if self.cursor.x == 0 {
                                     if self.cursor.y == 0 {
+                                        self.cursor.last_x = self.cursor.x;
                                         continue;
                                     }
 
@@ -227,7 +253,7 @@ impl Editor {
                                         self.line_background(false);
                                         self.cursor.y -= 1;
                                         self.cursor.x  = self.lines[self.cursor.y].len();
-                                        move_to(self.cursor.x + 1, self.cursor.y + 2);
+                                        self.update_cursor();
                                     } else {
                                         let len  = self.lines[self.cursor.y - 1].len();
                                         let line = self.lines.remove(self.cursor.y);
@@ -258,6 +284,8 @@ impl Editor {
                                     self.cursor.x -= 1;
                                     self.lines[self.cursor.y].remove(self.cursor.x);
                                 }
+
+                                self.cursor.last_x = self.cursor.x;
                             },
                             _ => {
                                 #[cfg(debug_assertions)]
@@ -283,6 +311,10 @@ impl Editor {
         for line in self.lines {
             println!("{line}");
         }
+    }
+
+    fn update_cursor(&self) {
+        move_to(self.cursor.x + 1, self.cursor.y + 2);
     }
 
     fn try_read_special(buf: &mut [u8; 2]) -> bool {
