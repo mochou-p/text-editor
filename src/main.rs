@@ -189,6 +189,40 @@ impl Editor {
                         self.cursor.last_x = self.cursor.x;
                     } else {
                         match buffer[0] {
+                            8 => {  // Ctrl+Backspace
+                                if self.cursor.x == 0 {
+                                    if self.cursor.y != 0 {
+                                        self.backspace();
+                                        continue;
+                                    }
+                                } else {
+                                    if let Some(i) = self.lines[self.cursor.y][..self.cursor.x - 1].rfind(char::is_whitespace) {
+                                        let count = self.cursor.x - i - 1;
+                                        self.lines[self.cursor.y].replace_range(i + 1..self.cursor.x, "");
+                                        self.cursor.x = i + 1;
+                                        self.update_cursor();
+                                        print!(
+                                            "{}{}",
+                                            &self.lines[self.cursor.y][self.cursor.x..],
+                                            " ".repeat(count)
+                                        );
+                                    } else {
+                                        let count = self.cursor.x;
+                                        self.lines[self.cursor.y].replace_range(..self.cursor.x, "");
+                                        self.cursor.x = 0;
+                                        self.update_cursor();
+                                        print!(
+                                            "{}{}",
+                                            self.lines[self.cursor.y],
+                                            " ".repeat(count)
+                                        );
+                                    }
+
+                                    self.update_cursor();
+                                }
+
+                                self.cursor.last_x = self.cursor.x;
+                            },
                             13 => {  // Enter
                                 self.cursor.y += 1;
                                 self.lines.insert(self.cursor.y, String::with_capacity(256));
@@ -294,56 +328,7 @@ impl Editor {
                                 }
                             },
                             127 => {  // Backspace
-                                if self.cursor.x == 0 {
-                                    if self.cursor.y == 0 {
-                                        self.cursor.last_x = self.cursor.x;
-                                        continue;
-                                    }
-
-                                    if self.lines[self.cursor.y].is_empty() {
-                                        self.lines.remove(self.cursor.y);
-
-                                        print!("{}", self.lines[self.cursor.y..].join(&format!("{CSI}0K{CSI}1E")));
-                                        if self.cursor.y != self.lines.len() {
-                                            print!("{CSI}0K{CSI}1E");
-                                        }
-
-                                        self.line_background(false);
-                                        self.cursor.y -= 1;
-                                        self.cursor.x  = self.lines[self.cursor.y].len();
-                                        self.update_cursor();
-                                    } else {
-                                        let len  = self.lines[self.cursor.y - 1].len();
-                                        let line = self.lines.remove(self.cursor.y);
-                                        self.lines[self.cursor.y - 1].push_str(&line);
-
-                                        print!("{}", self.lines[self.cursor.y..].join(&format!("{CSI}0K{CSI}1E")));
-                                        if self.cursor.y != self.lines.len() {
-                                            print!("{CSI}0K{CSI}1E");
-                                        }
-
-                                        self.line_background(false);
-                                        self.cursor.y -= 1;
-                                        move_to(len + 1, self.cursor.y + 2);
-                                        print!("{line}");
-                                        move_to(len + 1, self.cursor.y + 2);
-                                        self.cursor.x = len;
-                                    }
-                                } else if self.cursor.x == self.lines[self.cursor.y].len() {
-                                    move_left(1);
-                                    print!(" ");
-                                    move_left(1);
-                                    self.lines[self.cursor.y].pop();
-                                    self.cursor.x -= 1;
-                                } else {
-                                    move_left(1);
-                                    print!("{} ", &self.lines[self.cursor.y][self.cursor.x..]);
-                                    move_to_x(self.cursor.x);
-                                    self.cursor.x -= 1;
-                                    self.lines[self.cursor.y].remove(self.cursor.x);
-                                }
-
-                                self.cursor.last_x = self.cursor.x;
+                                self.backspace();
                             },
                             _ => {
                                 #[cfg(debug_assertions)]
@@ -369,6 +354,59 @@ impl Editor {
         for line in self.lines {
             println!("{line}");
         }
+    }
+
+    fn backspace(&mut self) {
+        if self.cursor.x == 0 {
+            if self.cursor.y == 0 {
+                self.cursor.last_x = self.cursor.x;
+                return;
+            }
+
+            if self.lines[self.cursor.y].is_empty() {
+                self.lines.remove(self.cursor.y);
+
+                print!("{}", self.lines[self.cursor.y..].join(&format!("{CSI}0K{CSI}1E")));
+                if self.cursor.y != self.lines.len() {
+                    print!("{CSI}0K{CSI}1E");
+                }
+
+                self.line_background(false);
+                self.cursor.y -= 1;
+                self.cursor.x  = self.lines[self.cursor.y].len();
+                self.update_cursor();
+            } else {
+                let len  = self.lines[self.cursor.y - 1].len();
+                let line = self.lines.remove(self.cursor.y);
+                self.lines[self.cursor.y - 1].push_str(&line);
+
+                print!("{}", self.lines[self.cursor.y..].join(&format!("{CSI}0K{CSI}1E")));
+                if self.cursor.y != self.lines.len() {
+                    print!("{CSI}0K{CSI}1E");
+                }
+
+                self.line_background(false);
+                self.cursor.y -= 1;
+                move_to(len + 1, self.cursor.y + 2);
+                print!("{line}");
+                move_to(len + 1, self.cursor.y + 2);
+                self.cursor.x = len;
+            }
+        } else if self.cursor.x == self.lines[self.cursor.y].len() {
+            move_left(1);
+            print!(" ");
+            move_left(1);
+            self.lines[self.cursor.y].pop();
+            self.cursor.x -= 1;
+        } else {
+            move_left(1);
+            print!("{} ", &self.lines[self.cursor.y][self.cursor.x..]);
+            move_to_x(self.cursor.x);
+            self.cursor.x -= 1;
+            self.lines[self.cursor.y].remove(self.cursor.x);
+        }
+
+        self.cursor.last_x = self.cursor.x;
     }
 
     fn update_cursor(&self) {
