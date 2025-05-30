@@ -146,7 +146,15 @@ impl Editor {
                                         continue;
                                     }
                                 } else {
-                                    if let Some(i) = self.lines[self.cursor.y][..self.cursor.x - 1].rfind(char::is_whitespace) {
+                                    if let Some(mut i) = self.lines[self.cursor.y][..self.cursor.x - 1].rfind(char::is_whitespace) {
+                                        let mut j = 0;
+                                        while self.lines[self.cursor.y].chars().nth(self.cursor.x - 1 - j) == Some(' ') {
+                                            j += 1;
+                                        }
+                                        if j != 0 {
+                                            i -= j - usize::from(j == 1);
+                                        }
+
                                         let count = self.cursor.x - i - 1;
                                         self.lines[self.cursor.y].replace_range(i + 1..self.cursor.x, "");
                                         self.cursor.x = i + 1;
@@ -316,6 +324,15 @@ impl Editor {
                                                 } else {
                                                     if let Some(mut i) = self.lines[self.cursor.y][self.cursor.x + 1..].find(char::is_whitespace) {
                                                         i += 1;
+
+                                                        let mut j = 0;
+                                                        while self.lines[self.cursor.y].chars().nth(self.cursor.x + j) == Some(' ') {
+                                                            j += 1;
+                                                        }
+                                                        if j != 0 {
+                                                            i += j - usize::from(j == 1);
+                                                        }
+
                                                         self.lines[self.cursor.y].replace_range(self.cursor.x..self.cursor.x + i, "");
                                                         print!(
                                                             "{}{}",

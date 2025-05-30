@@ -13,7 +13,7 @@ readme       = "README.md"
 license      = "MIT OR Apache-2.0"
 repository   = "https://github.com/mochou-p/text-editor"
 
-keywords     = ["editor", "text-editor", "text-based"]
+keywords     = ["editor", "text", "text-editor", "text-based"]
 categories   = ["text-editors", "command-line-utilities", "development-tools", "filesystem"]
 
 [dependencies]

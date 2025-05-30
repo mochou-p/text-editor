@@ -1,5 +1,8 @@
 // text-editor/src/main.rs
 
+#[cfg(not(target_os = "linux"))]
+compile_error!("this project only supports Linux");
+
 mod ansi;
 mod editor;
 
