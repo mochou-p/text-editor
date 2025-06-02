@@ -146,36 +146,33 @@ impl Editor {
                                         continue;
                                     }
                                 } else {
-                                    if let Some(mut i) = self.lines[self.cursor.y][..self.cursor.x - 1].rfind(char::is_whitespace) {
-                                        let mut j = 0;
-                                        while self.lines[self.cursor.y].chars().nth(self.cursor.x - 1 - j) == Some(' ') {
-                                            j += 1;
-                                        }
-                                        if j != 0 {
-                                            i -= j - usize::from(j == 1);
-                                        }
+                                    let left =
+                                        if self.lines[self.cursor.y].chars().nth(self.cursor.x - 1).unwrap().is_whitespace() {
+                                            self.lines
+                                                [self.cursor.y]
+                                                [..
+                                                    self.lines
+                                                        [self.cursor.y]
+                                                        [..self.cursor.x - 1]
+                                                        .rfind(|c: char| !c.is_whitespace())
+                                                        .unwrap()
+                                                ]
+                                                    .rfind(char::is_whitespace)
+                                                    .map_or(0, |x| x + 1)
+                                        } else {
+                                            self.lines
+                                                [self.cursor.y]
+                                                [..self.cursor.x - 1]
+                                                .rfind(char::is_whitespace)
+                                                .map_or(0, |x| x + 1)
+                                        };
 
-                                        let count = self.cursor.x - i - 1;
-                                        self.lines[self.cursor.y].replace_range(i + 1..self.cursor.x, "");
-                                        self.cursor.x = i + 1;
-                                        self.update_cursor();
-                                        print!(
-                                            "{}{}",
-                                            &self.lines[self.cursor.y][self.cursor.x..],
-                                            " ".repeat(count)
-                                        );
-                                    } else {
-                                        let count = self.cursor.x;
-                                        self.lines[self.cursor.y].replace_range(..self.cursor.x, "");
-                                        self.cursor.x = 0;
-                                        self.update_cursor();
-                                        print!(
-                                            "{}{}",
-                                            self.lines[self.cursor.y],
-                                            " ".repeat(count)
-                                        );
-                                    }
-
+                                    self.lines[self.cursor.y].replace_range(left..self.cursor.x, "");
+                                    let old_cursor_x = self.cursor.x;
+                                    self.cursor.x = left;
+                                    self.update_cursor();
+                                    let remainder = &self.lines[self.cursor.y][self.cursor.x..];
+                                    print!("{remainder}{}", " ".repeat(old_cursor_x - left));
                                     self.update_cursor();
                                 }
 
@@ -322,29 +319,35 @@ impl Editor {
                                                         continue;
                                                     }
                                                 } else {
-                                                    if let Some(mut i) = self.lines[self.cursor.y][self.cursor.x + 1..].find(char::is_whitespace) {
-                                                        i += 1;
+                                                    let mut right =
+                                                        if self.lines[self.cursor.y].chars().nth(self.cursor.x).unwrap().is_whitespace() {
+                                                            let idk = self.lines
+                                                                [self.cursor.y]
+                                                                [self.cursor.x..]
+                                                                .find(|c: char| !c.is_whitespace())
+                                                                .unwrap();
 
-                                                        let mut j = 0;
-                                                        while self.lines[self.cursor.y].chars().nth(self.cursor.x + j) == Some(' ') {
-                                                            j += 1;
-                                                        }
-                                                        if j != 0 {
-                                                            i += j - usize::from(j == 1);
-                                                        }
+                                                            self.lines
+                                                                [self.cursor.y]
+                                                                [self.cursor.x + idk..]
+                                                                    .find(char::is_whitespace)
+                                                                    .map_or(self.lines[self.cursor.y].len(), |x| x + idk)
+                                                        } else {
+                                                            self.lines
+                                                                [self.cursor.y]
+                                                                [self.cursor.x..]
+                                                                .find(char::is_whitespace)
+                                                                .map_or(self.lines[self.cursor.y].len(), |x| x)
+                                                        };
 
-                                                        self.lines[self.cursor.y].replace_range(self.cursor.x..self.cursor.x + i, "");
-                                                        print!(
-                                                            "{}{}",
-                                                            &self.lines[self.cursor.y][self.cursor.x..],
-                                                            " ".repeat(i)
-                                                        );
-                                                    } else {
-                                                        let count = self.lines[self.cursor.y].len() - self.cursor.x;
-                                                        self.lines[self.cursor.y].truncate(self.cursor.x);
-                                                        print!("{}", " ".repeat(count));
+                                                    if self.cursor.x + right - 1 == self.lines[self.cursor.y].len() {
+                                                        right -= 1;
                                                     }
-
+                                                    let remainder = String::from(&self.lines[self.cursor.y][self.cursor.x + right..]);
+                                                    let mut count = self.lines[self.cursor.y].len();
+                                                    self.lines[self.cursor.y].replace_range(self.cursor.x..self.cursor.x + right, "");
+                                                    count -= self.lines[self.cursor.y].len();
+                                                    print!("{remainder}{}", " ".repeat(count));
                                                     self.update_cursor();
                                                 }
 
@@ -659,7 +662,7 @@ impl Drop for Editor {
         {
             println!("--- file");
             for line in &self.lines {
-            println!("{line}");
+            println!("{CSI}{FOREGROUND_RED}|{CSI}{RESET}{line}{CSI}{FOREGROUND_RED}|{CSI}{RESET}");
             }
             println!("--- EOF");
         }
