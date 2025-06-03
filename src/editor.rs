@@ -6,7 +6,9 @@ use libc::{
 };
 
 use std::{
-    io::{stdin, stdout, Error, Read as _, Write as _},
+    env::args,
+    fs::read_to_string,
+    io::{stdin, stdout, Error, ErrorKind, Read as _, Write as _},
     mem::zeroed
 };
 
@@ -15,6 +17,7 @@ use super::ansi::{
     clear, cursor, state,
     CSI
 };
+
 
 static FG: &str = "38;2;";
 static BG: &str = "48;2;";
@@ -52,6 +55,7 @@ struct Cursor {
 }
 
 pub struct Editor {
+    file:   Option<(String, bool)>,
     cursor: Cursor,
     size:   winsize,
     lines:  Vec<String>
@@ -70,11 +74,46 @@ impl Editor {
             );
         }
 
-        let cursor    = Cursor { last_x: 0, x: 0, y: 0 };
-        let mut lines = Vec::with_capacity(2048);
-        lines.push(String::with_capacity(256));
+        let cursor = Cursor { last_x: 0, x: 0, y: 0 };
 
-        EditorResult::Ok(Self { cursor, size, lines })
+        let mut args = args();
+        let (file, lines) = match args.len() {
+            1 => {
+                let mut lines = Vec::with_capacity(2048);
+                lines.push(String::with_capacity(256));
+
+                (None, lines)
+            },
+            2 => {
+                let filepath        = args.nth(1).unwrap();
+                let (lines, exists) = match read_to_string(&filepath) {
+                    Ok(string) => {
+                        if !string.is_ascii() {
+                            return EditorResult::Err(String::from("non-ascii characters in file are currently not supported"));
+                        }
+
+                        (string.lines().map(|line| String::from(line)).collect(), true)
+                    },
+                    Err(err) => {
+                        if err.kind() == ErrorKind::NotFound {
+                            let mut lines = Vec::with_capacity(2048);
+                            lines.push(String::with_capacity(256));
+
+                            (lines, false)
+                        } else {
+                            return EditorResult::Err(format!("`std::fs::read_to_string` returned \"{err}\""));
+                        }
+                    }
+                };
+
+                (Some((filepath, exists)), lines)
+            },
+            _ => {
+                return EditorResult::Err(String::from("multiple files are currently not supported"));
+            }
+        };
+
+        EditorResult::Ok(Self { file, cursor, size, lines })
     }
 
     #[expect(clippy::too_many_lines, clippy::cognitive_complexity, reason = "temp")]
@@ -116,6 +155,13 @@ impl Editor {
 
         cursor::move_to(1, 2);
         cursor::show();
+
+        if let Some((_, exists)) = self.file {
+            if exists {
+                print!("{}{CSI}0K", self.lines.join(&format!("{CSI}0K{CSI}1E")));
+                self.update_cursor();
+            }
+        }
 
         // i will clean this up one day
         loop {
@@ -340,20 +386,18 @@ impl Editor {
                                                                 .map_or(self.lines[self.cursor.y].len(), |x| x)
                                                         };
 
-                                                    if self.cursor.x + right - 1 == self.lines[self.cursor.y].len() {
-                                                        right -= 1;
-                                                    }
-                                                    let remainder = String::from(&self.lines[self.cursor.y][right + 1..]);
-                                                    if remainder.is_empty() {
+                                                    if right == self.lines[self.cursor.y].len() {
                                                         let count = self.lines[self.cursor.y].len() - self.cursor.x;
                                                         self.lines[self.cursor.y].truncate(self.cursor.x);
                                                         print!("{}", " ".repeat(count));
                                                     } else {
+                                                        let remainder = String::from(&self.lines[self.cursor.y][self.cursor.x + right..]);
                                                         let mut count = self.lines[self.cursor.y].len();
                                                         self.lines[self.cursor.y].replace_range(self.cursor.x..self.cursor.x + right, "");
                                                         count -= self.lines[self.cursor.y].len();
                                                         print!("{remainder}{}", " ".repeat(count));
                                                     }
+
                                                     self.update_cursor();
                                                 }
 
