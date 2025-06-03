@@ -92,7 +92,7 @@ impl Editor {
                             return EditorResult::Err(String::from("non-ascii characters in file are currently not supported"));
                         }
 
-                        (string.lines().map(|line| String::from(line)).collect(), true)
+                        (string.lines().map(String::from).collect(), true)
                     },
                     Err(err) => {
                         if err.kind() == ErrorKind::NotFound {
@@ -201,7 +201,7 @@ impl Editor {
                                                         [self.cursor.y]
                                                         [..self.cursor.x - 1]
                                                         .rfind(|c: char| !c.is_whitespace())
-                                                        .unwrap()
+                                                        .unwrap_or(0)
                                                 ]
                                                     .rfind(char::is_whitespace)
                                                     .map_or(0, |x| x + 1)
@@ -365,13 +365,13 @@ impl Editor {
                                                         continue;
                                                     }
                                                 } else {
-                                                    let mut right =
+                                                    let right =
                                                         if self.lines[self.cursor.y].chars().nth(self.cursor.x).unwrap().is_whitespace() {
                                                             let idk = self.lines
                                                                 [self.cursor.y]
                                                                 [self.cursor.x..]
                                                                 .find(|c: char| !c.is_whitespace())
-                                                                .unwrap();
+                                                                .unwrap_or(self.lines[self.cursor.y].len());
 
                                                             self.lines
                                                                 [self.cursor.y]
