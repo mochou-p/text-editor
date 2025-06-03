@@ -7,9 +7,10 @@ use libc::{
 
 use std::{
     env::args,
-    fs::read_to_string,
+    fs::{create_dir_all, read_to_string, File},
     io::{stdin, stdout, Error, ErrorKind, Read as _, Write as _},
-    mem::zeroed
+    mem::zeroed,
+    path::Path
 };
 
 use super::ansi::{
@@ -88,11 +89,17 @@ impl Editor {
                 let filepath        = args.nth(1).unwrap();
                 let (lines, exists) = match read_to_string(&filepath) {
                     Ok(string) => {
-                        if !string.is_ascii() {
-                            return EditorResult::Err(String::from("non-ascii characters in file are currently not supported"));
-                        }
+                        if string.is_empty() {
+                            let mut lines = Vec::with_capacity(2048);
+                            lines.push(String::with_capacity(256));
+                            (lines, true)
+                        } else {
+                            if !string.is_ascii() {
+                                return EditorResult::Err(String::from("non-ascii characters in file are currently not supported"));
+                            }
 
-                        (string.lines().map(String::from).collect(), true)
+                            (string.lines().map(String::from).collect(), true)
+                        }
                     },
                     Err(err) => {
                         if err.kind() == ErrorKind::NotFound {
@@ -241,6 +248,26 @@ impl Editor {
                                 self.update_cursor();
 
                                 self.cursor.last_x = self.cursor.x;
+                            },
+                            19 => {
+                                let Some((filepath, _)) = &self.file else { continue; };
+
+                                if let Some(parent) = Path::new(&filepath).parent() {
+                                    create_dir_all(parent).unwrap();
+                                }
+
+                                let mut file    = File::create(filepath).unwrap();
+                                let mut content = self.lines.join("\n");
+
+                                if self.lines.len() == 1 && self.lines[0].is_empty() {
+                                    file.set_len(0);
+                                    continue;
+                                }
+
+                                if self.lines[self.lines.len() - 1].is_empty() {
+                                    content.push('\n');
+                                }
+                                file.write_all(content.as_bytes()).unwrap();
                             },
                             27 => {
                                 if !Self::try_read_special(&mut idklol) {  // Escape
@@ -662,7 +689,11 @@ impl Editor {
     }
 
     fn header(&self) {
-        let filename = "<unnamed file>";
+        let filename = if let Some((filepath, _)) = &self.file {
+            filepath.clone()
+        } else {
+            String::from("<unnamed file>")
+        };
 
         #[cfg(debug_assertions)]
         {
