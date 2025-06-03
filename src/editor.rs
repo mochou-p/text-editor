@@ -355,14 +355,20 @@ impl Editor {
                                             },
                                             70 => {  // Ctrl+End
                                                 let last = self.lines.len() - 1;
-                                                if self.cursor.y != last {
+                                                if self.cursor.y == last {
+                                                    self.cursor.last_x = self.cursor.x;
+                                                } else {
                                                     self.cursor.y = last;
+                                                    self.cursor.x = self.cursor.x.max(self.cursor.last_x).min(self.lines[self.cursor.y].len());
                                                     self.update_cursor();
                                                 }
                                             },
                                             72 => {  // Ctrl+Home
-                                                if self.cursor.y != 0 {
+                                                if self.cursor.y == 0 {
+                                                    self.cursor.last_x = self.cursor.x;
+                                                } else {
                                                     self.cursor.y = 0;
+                                                    self.cursor.x = self.cursor.x.max(self.cursor.last_x).min(self.lines[self.cursor.y].len());
                                                     self.update_cursor();
                                                 }
                                             },
