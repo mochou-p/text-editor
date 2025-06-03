@@ -249,7 +249,7 @@ impl Editor {
 
                                 self.cursor.last_x = self.cursor.x;
                             },
-                            19 => {
+                            19 => {  // Ctrl+S
                                 let Some((filepath, _)) = &self.file else { continue; };
 
                                 if let Some(parent) = Path::new(&filepath).parent() {
@@ -260,7 +260,7 @@ impl Editor {
                                 let mut content = self.lines.join("\n");
 
                                 if self.lines.len() == 1 && self.lines[0].is_empty() {
-                                    file.set_len(0);
+                                    file.set_len(0).unwrap();
                                     continue;
                                 }
 
@@ -351,6 +351,19 @@ impl Editor {
 
                                                     self.update_cursor();
                                                     self.cursor.last_x = self.cursor.x;
+                                                }
+                                            },
+                                            70 => {  // Ctrl+End
+                                                let last = self.lines.len() - 1;
+                                                if self.cursor.y != last {
+                                                    self.cursor.y = last;
+                                                    self.update_cursor();
+                                                }
+                                            },
+                                            72 => {  // Ctrl+Home
+                                                if self.cursor.y != 0 {
+                                                    self.cursor.y = 0;
+                                                    self.update_cursor();
                                                 }
                                             },
                                             _ => {
@@ -482,6 +495,23 @@ impl Editor {
                                         } else {
                                             print!("{CSI}1D");
                                             self.cursor.x -= 1;
+                                        }
+
+                                        self.cursor.last_x = self.cursor.x;
+                                    },
+                                    70 => {  // End
+                                        let len = self.lines[self.cursor.y].len();
+                                        if self.cursor.x != len {
+                                            self.cursor.x = len;
+                                            self.update_cursor();
+                                        }
+
+                                        self.cursor.last_x = self.cursor.x;
+                                    },
+                                    72 => {  // Home
+                                        if self.cursor.x != 0 {
+                                            self.cursor.x = 0;
+                                            self.update_cursor();
                                         }
 
                                         self.cursor.last_x = self.cursor.x;
