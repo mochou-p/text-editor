@@ -343,11 +343,17 @@ impl Editor {
                                                     if self.cursor.x + right - 1 == self.lines[self.cursor.y].len() {
                                                         right -= 1;
                                                     }
-                                                    let remainder = String::from(&self.lines[self.cursor.y][self.cursor.x + right..]);
-                                                    let mut count = self.lines[self.cursor.y].len();
-                                                    self.lines[self.cursor.y].replace_range(self.cursor.x..self.cursor.x + right, "");
-                                                    count -= self.lines[self.cursor.y].len();
-                                                    print!("{remainder}{}", " ".repeat(count));
+                                                    let remainder = String::from(&self.lines[self.cursor.y][right + 1..]);
+                                                    if remainder.is_empty() {
+                                                        let count = self.lines[self.cursor.y].len() - self.cursor.x;
+                                                        self.lines[self.cursor.y].truncate(self.cursor.x);
+                                                        print!("{}", " ".repeat(count));
+                                                    } else {
+                                                        let mut count = self.lines[self.cursor.y].len();
+                                                        self.lines[self.cursor.y].replace_range(self.cursor.x..self.cursor.x + right, "");
+                                                        count -= self.lines[self.cursor.y].len();
+                                                        print!("{remainder}{}", " ".repeat(count));
+                                                    }
                                                     self.update_cursor();
                                                 }
 
