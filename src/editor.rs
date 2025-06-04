@@ -272,67 +272,217 @@ impl Editor {
                                     return;
                                 }
 
-                                if idklol[0] != 91 {
-                                    print!("{CSI}{RESET}");
-                                    state::normal_screen();
-                                    let _ = stdout.flush();
-                                    unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
-                                    eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?}", line!());
-                                    return;
-                                }
+                                match idklol[0] {
+                                    91 => {
+                                        match idklol[1] {
+                                            49 => {
+                                                let mut lolidk = [0u8; 3];
 
-                                match idklol[1] {
-                                    49 => {
-                                        let mut lolidk = [0u8; 3];
+                                                if !Self::try_read_special(&mut lolidk) {
+                                                    print!("{CSI}{RESET}");
+                                                    state::normal_screen();
+                                                    let _ = stdout.flush();
+                                                    unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
+                                                    eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?}", line!());
+                                                    return;
+                                                }
 
-                                        if !Self::try_read_special(&mut lolidk) {
-                                            print!("{CSI}{RESET}");
-                                            state::normal_screen();
-                                            let _ = stdout.flush();
-                                            unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
-                                            eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?}", line!());
-                                            return;
-                                        }
+                                                if lolidk[0] != 59 || lolidk[1] != 53 {
+                                                    print!("{CSI}{RESET}");
+                                                    state::normal_screen();
+                                                    let _ = stdout.flush();
+                                                    unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
+                                                    eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
+                                                    return;
+                                                }
 
-                                        if lolidk[0] != 59 || lolidk[1] != 53 {
-                                            print!("{CSI}{RESET}");
-                                            state::normal_screen();
-                                            let _ = stdout.flush();
-                                            unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
-                                            eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
-                                            return;
-                                        }
+                                                match lolidk[2] {
+                                                    65 => {  // Ctrl+ArrowUp
+                                                        self.up();
+                                                    },
+                                                    66 => {  // Ctrl+ArrowDown
+                                                        self.down();
+                                                    },
+                                                    67 => {  // Ctrl+ArrowRight
+                                                        let len = self.lines[self.cursor.y].len();
+                                                        if self.cursor.x == len {
+                                                            if self.cursor.y != self.lines.len() - 1 {
+                                                                self.cursor.x  = 0;
+                                                                self.cursor.y += 1;
+                                                                self.update_cursor();
+                                                            }
+                                                        } else {
+                                                            let right = self.get_right_whitespace_x();
 
-                                        match lolidk[2] {
-                                            65 => {  // Ctrl+ArrowUp
+                                                            if right == len {
+                                                                self.cursor.x  = len;
+                                                            } else {
+                                                                self.cursor.x += right;
+                                                            }
+
+                                                            self.update_cursor();
+                                                        }
+
+                                                        self.cursor.last_x = self.cursor.x;
+                                                    },
+                                                    68 => {  // Ctrl+ArrowLeft
+                                                        if self.cursor.x == 0 {
+                                                            if self.cursor.y != 0 {
+                                                                self.cursor.y -= 1;
+                                                                self.cursor.x  = self.lines[self.cursor.y].len();
+                                                                self.update_cursor();
+                                                            }
+                                                        } else {
+                                                            let left = self.get_left_whitespace_x();
+
+                                                            self.cursor.x = left;
+                                                            self.update_cursor();
+                                                            self.cursor.last_x = self.cursor.x;
+                                                        }
+                                                    },
+                                                    70 => {  // Ctrl+End
+                                                        let last = self.lines.len() - 1;
+                                                        if self.cursor.y == last {
+                                                            self.cursor.last_x = self.cursor.x;
+                                                        } else {
+                                                            self.cursor.y = last;
+                                                            self.cursor.x = self.cursor.x.max(self.cursor.last_x).min(self.lines[self.cursor.y].len());
+                                                            self.update_cursor();
+                                                        }
+                                                    },
+                                                    72 => {  // Ctrl+Home
+                                                        if self.cursor.y == 0 {
+                                                            self.cursor.last_x = self.cursor.x;
+                                                        } else {
+                                                            self.cursor.y = 0;
+                                                            self.cursor.x = self.cursor.x.max(self.cursor.last_x).min(self.lines[self.cursor.y].len());
+                                                            self.update_cursor();
+                                                        }
+                                                    },
+                                                    _ => {
+                                                        print!("{CSI}{RESET}");
+                                                        state::normal_screen();
+                                                        let _  = stdout.flush();
+                                                        unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
+                                                        eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
+                                                        return;
+                                                    }
+                                                }
+                                            },
+                                            51 => {
+                                                let mut lolidk = [0u8; 3];
+
+                                                if !Self::try_read_special(&mut lolidk) {
+                                                    print!("{CSI}{RESET}");
+                                                    state::normal_screen();
+                                                    let _ = stdout.flush();
+                                                    unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
+                                                    eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
+                                                    return;
+                                                }
+
+                                                match lolidk[0] {
+                                                    59 => {
+                                                        if lolidk[2] != 126 {
+                                                            print!("{CSI}{RESET}");
+                                                            state::normal_screen();
+                                                            let _ = stdout.flush();
+                                                            unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
+                                                            eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
+                                                            return;
+                                                        }
+
+                                                        match lolidk[1] {
+                                                            51 => {  // Alt+Delete
+                                                                let len = self.lines[self.cursor.y].len();
+                                                                if self.cursor.x != len {
+                                                                    self.lines[self.cursor.y].truncate(self.cursor.x);
+                                                                    let count = len - self.cursor.x;
+                                                                    print!("{}", " ".repeat(count));
+                                                                    self.update_cursor();
+                                                                }
+
+                                                                self.cursor.last_x = self.cursor.x;
+                                                            },
+                                                            53 => {  // Ctrl+Delete
+                                                                if self.cursor.x == self.lines[self.cursor.y].len() {
+                                                                    if self.cursor.y != self.lines.len() {
+                                                                        self.delete();
+                                                                        continue;
+                                                                    }
+                                                                } else {
+                                                                    let right = self.get_right_whitespace_x();
+
+                                                                    if right == self.lines[self.cursor.y].len() {
+                                                                        let count = self.lines[self.cursor.y].len() - self.cursor.x;
+                                                                        self.lines[self.cursor.y].truncate(self.cursor.x);
+                                                                        print!("{}", " ".repeat(count));
+                                                                    } else {
+                                                                        let remainder = String::from(&self.lines[self.cursor.y][self.cursor.x + right..]);
+                                                                        let mut count = self.lines[self.cursor.y].len();
+                                                                        self.lines[self.cursor.y].replace_range(self.cursor.x..self.cursor.x + right, "");
+                                                                        count -= self.lines[self.cursor.y].len();
+                                                                        print!("{remainder}{}", " ".repeat(count));
+                                                                    }
+
+                                                                    self.update_cursor();
+                                                                }
+
+                                                                self.cursor.last_x = self.cursor.x;
+                                                            },
+                                                            _ => {
+                                                                print!("{CSI}{RESET}");
+                                                                state::normal_screen();
+                                                                let _ = stdout.flush();
+                                                                unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
+                                                                eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
+                                                                return;
+                                                            }
+                                                        }
+                                                    },
+                                                    126 => {  // Delete
+                                                        if lolidk[1] != 0 || lolidk[2] != 0 {
+                                                            print!("{CSI}{RESET}");
+                                                            state::normal_screen();
+                                                            let _ = stdout.flush();
+                                                            unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
+                                                            eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
+                                                            return;
+                                                        }
+
+                                                        self.delete();
+                                                    },
+                                                    _ => {
+                                                        print!("{CSI}{RESET}");
+                                                        state::normal_screen();
+                                                        let _ = stdout.flush();
+                                                        unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
+                                                        eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
+                                                        return;
+                                                    }
+                                                }
+                                            },
+                                            65 => {  // ArrowUp/ScrollUp
                                                 self.up();
                                             },
-                                            66 => {  // Ctrl+ArrowDown
+                                            66 => {  // ArrowDown/ScrollDown
                                                 self.down();
                                             },
-                                            67 => {  // Ctrl+ArrowRight
-                                                let len = self.lines[self.cursor.y].len();
-                                                if self.cursor.x == len {
-                                                    if self.cursor.y != self.lines.len() - 1 {
+                                            67 => {  // ArrowRight
+                                                if self.cursor.x == self.lines[self.cursor.y].len() {
+                                                    if self.cursor.y < self.lines.len() - 1 {
+                                                        cursor::move_to_next_line(1);
                                                         self.cursor.x  = 0;
                                                         self.cursor.y += 1;
-                                                        self.update_cursor();
                                                     }
                                                 } else {
-                                                    let right = self.get_right_whitespace_x();
-
-                                                    if right == len {
-                                                        self.cursor.x  = len;
-                                                    } else {
-                                                        self.cursor.x += right;
-                                                    }
-
-                                                    self.update_cursor();
+                                                    print!("{CSI}1C");
+                                                    self.cursor.x += 1;
                                                 }
 
                                                 self.cursor.last_x = self.cursor.x;
                                             },
-                                            68 => {  // Ctrl+ArrowLeft
+                                            68 => {  // ArrowLeft
                                                 if self.cursor.x == 0 {
                                                     if self.cursor.y != 0 {
                                                         self.cursor.y -= 1;
@@ -340,46 +490,43 @@ impl Editor {
                                                         self.update_cursor();
                                                     }
                                                 } else {
-                                                    let left = self.get_left_whitespace_x();
+                                                    print!("{CSI}1D");
+                                                    self.cursor.x -= 1;
+                                                }
 
-                                                    self.cursor.x = left;
-                                                    self.update_cursor();
-                                                    self.cursor.last_x = self.cursor.x;
-                                                }
+                                                self.cursor.last_x = self.cursor.x;
                                             },
-                                            70 => {  // Ctrl+End
-                                                let last = self.lines.len() - 1;
-                                                if self.cursor.y == last {
-                                                    self.cursor.last_x = self.cursor.x;
-                                                } else {
-                                                    self.cursor.y = last;
-                                                    self.cursor.x = self.cursor.x.max(self.cursor.last_x).min(self.lines[self.cursor.y].len());
+                                            70 => {  // End
+                                                let len = self.lines[self.cursor.y].len();
+                                                if self.cursor.x != len {
+                                                    self.cursor.x = len;
                                                     self.update_cursor();
                                                 }
+
+                                                self.cursor.last_x = self.cursor.x;
                                             },
-                                            72 => {  // Ctrl+Home
-                                                if self.cursor.y == 0 {
-                                                    self.cursor.last_x = self.cursor.x;
-                                                } else {
-                                                    self.cursor.y = 0;
-                                                    self.cursor.x = self.cursor.x.max(self.cursor.last_x).min(self.lines[self.cursor.y].len());
+                                            72 => {  // Home
+                                                if self.cursor.x != 0 {
+                                                    self.cursor.x = 0;
                                                     self.update_cursor();
                                                 }
+
+                                                self.cursor.last_x = self.cursor.x;
                                             },
                                             _ => {
                                                 print!("{CSI}{RESET}");
                                                 state::normal_screen();
-                                                let _  = stdout.flush();
+                                                let _ = stdout.flush();
                                                 unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
-                                                eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
+                                                eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?}", line!());
                                                 return;
                                             }
                                         }
                                     },
-                                    51 => {
+                                    127 => {  // Alt+Backspace
                                         let mut lolidk = [0u8; 3];
 
-                                        if !Self::try_read_special(&mut lolidk) {
+                                        if Self::try_read_special(&mut lolidk) {
                                             print!("{CSI}{RESET}");
                                             state::normal_screen();
                                             let _ = stdout.flush();
@@ -388,109 +535,10 @@ impl Editor {
                                             return;
                                         }
 
-                                        match lolidk[0] {
-                                            59 => {  // Ctrl+Delete
-                                                if lolidk[1] != 53 || lolidk[2] != 126 {
-                                                    print!("{CSI}{RESET}");
-                                                    state::normal_screen();
-                                                    let _ = stdout.flush();
-                                                    unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
-                                                    eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
-                                                    return;
-                                                }
-
-                                                if self.cursor.x == self.lines[self.cursor.y].len() {
-                                                    if self.cursor.y != self.lines.len() {
-                                                        self.delete();
-                                                        continue;
-                                                    }
-                                                } else {
-                                                    let right = self.get_right_whitespace_x();
-
-                                                    if right == self.lines[self.cursor.y].len() {
-                                                        let count = self.lines[self.cursor.y].len() - self.cursor.x;
-                                                        self.lines[self.cursor.y].truncate(self.cursor.x);
-                                                        print!("{}", " ".repeat(count));
-                                                    } else {
-                                                        let remainder = String::from(&self.lines[self.cursor.y][self.cursor.x + right..]);
-                                                        let mut count = self.lines[self.cursor.y].len();
-                                                        self.lines[self.cursor.y].replace_range(self.cursor.x..self.cursor.x + right, "");
-                                                        count -= self.lines[self.cursor.y].len();
-                                                        print!("{remainder}{}", " ".repeat(count));
-                                                    }
-
-                                                    self.update_cursor();
-                                                }
-
-                                                self.cursor.last_x = self.cursor.x;
-                                            },
-                                            126 => {  // Delete
-                                                if lolidk[1] != 0 || lolidk[2] != 0 {
-                                                    print!("{CSI}{RESET}");
-                                                    state::normal_screen();
-                                                    let _ = stdout.flush();
-                                                    unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
-                                                    eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
-                                                    return;
-                                                }
-
-                                                self.delete();
-                                            },
-                                            _ => {
-                                                print!("{CSI}{RESET}");
-                                                state::normal_screen();
-                                                let _ = stdout.flush();
-                                                unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
-                                                eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
-                                                return;
-                                            }
-                                        }
-                                    },
-                                    65 => {  // ArrowUp/ScrollUp
-                                        self.up();
-                                    },
-                                    66 => {  // ArrowDown/ScrollDown
-                                        self.down();
-                                    },
-                                    67 => {  // ArrowRight
-                                        if self.cursor.x == self.lines[self.cursor.y].len() {
-                                            if self.cursor.y < self.lines.len() - 1 {
-                                                cursor::move_to_next_line(1);
-                                                self.cursor.x  = 0;
-                                                self.cursor.y += 1;
-                                            }
-                                        } else {
-                                            print!("{CSI}1C");
-                                            self.cursor.x += 1;
-                                        }
-
-                                        self.cursor.last_x = self.cursor.x;
-                                    },
-                                    68 => {  // ArrowLeft
-                                        if self.cursor.x == 0 {
-                                            if self.cursor.y != 0 {
-                                                self.cursor.y -= 1;
-                                                self.cursor.x  = self.lines[self.cursor.y].len();
-                                                self.update_cursor();
-                                            }
-                                        } else {
-                                            print!("{CSI}1D");
-                                            self.cursor.x -= 1;
-                                        }
-
-                                        self.cursor.last_x = self.cursor.x;
-                                    },
-                                    70 => {  // End
-                                        let len = self.lines[self.cursor.y].len();
-                                        if self.cursor.x != len {
-                                            self.cursor.x = len;
-                                            self.update_cursor();
-                                        }
-
-                                        self.cursor.last_x = self.cursor.x;
-                                    },
-                                    72 => {  // Home
                                         if self.cursor.x != 0 {
+                                            self.lines[self.cursor.y].replace_range(0..self.cursor.x, "");
+                                            cursor::move_to_x(0);
+                                            print!("{}{}", self.lines[self.cursor.y], " ".repeat(self.cursor.x));
                                             self.cursor.x = 0;
                                             self.update_cursor();
                                         }
