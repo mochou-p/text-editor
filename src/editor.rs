@@ -199,26 +199,7 @@ impl Editor {
                                         continue;
                                     }
                                 } else {
-                                    let left =
-                                        if self.lines[self.cursor.y].chars().nth(self.cursor.x - 1).unwrap().is_whitespace() {
-                                            self.lines
-                                                [self.cursor.y]
-                                                [..
-                                                    self.lines
-                                                        [self.cursor.y]
-                                                        [..self.cursor.x - 1]
-                                                        .rfind(|c: char| !c.is_whitespace())
-                                                        .unwrap_or(0)
-                                                ]
-                                                    .rfind(char::is_whitespace)
-                                                    .map_or(0, |x| x + 1)
-                                        } else {
-                                            self.lines
-                                                [self.cursor.y]
-                                                [..self.cursor.x - 1]
-                                                .rfind(char::is_whitespace)
-                                                .map_or(0, |x| x + 1)
-                                        };
+                                    let left = self.get_left_whitespace_x();
 
                                     self.lines[self.cursor.y].replace_range(left..self.cursor.x, "");
                                     let old_cursor_x = self.cursor.x;
@@ -338,15 +319,18 @@ impl Editor {
                                                         self.update_cursor();
                                                     }
                                                 } else {
-                                                    if let Some(i) = self.lines[self.cursor.y][self.cursor.x + 1..].find(char::is_whitespace) {
-                                                        self.cursor.x += i + 1;
+                                                    let right = self.get_right_whitespace_x();
+
+                                                    if right == len {
+                                                        self.cursor.x  = len;
                                                     } else {
-                                                        self.cursor.x = len;
+                                                        self.cursor.x += right;
                                                     }
 
                                                     self.update_cursor();
-                                                    self.cursor.last_x = self.cursor.x;
                                                 }
+
+                                                self.cursor.last_x = self.cursor.x;
                                             },
                                             68 => {  // Ctrl+ArrowLeft
                                                 if self.cursor.x == 0 {
@@ -356,12 +340,9 @@ impl Editor {
                                                         self.update_cursor();
                                                     }
                                                 } else {
-                                                    if let Some(i) = self.lines[self.cursor.y][..self.cursor.x - 1].rfind(char::is_whitespace) {
-                                                        self.cursor.x = i + 1;
-                                                    } else {
-                                                        self.cursor.x = 0;
-                                                    }
+                                                    let left = self.get_left_whitespace_x();
 
+                                                    self.cursor.x = left;
                                                     self.update_cursor();
                                                     self.cursor.last_x = self.cursor.x;
                                                 }
@@ -424,26 +405,7 @@ impl Editor {
                                                         continue;
                                                     }
                                                 } else {
-                                                    let right =
-                                                        if self.lines[self.cursor.y].chars().nth(self.cursor.x).unwrap().is_whitespace() {
-                                                            let idk = self.lines
-                                                                [self.cursor.y]
-                                                                [self.cursor.x..]
-                                                                .find(|c: char| !c.is_whitespace())
-                                                                .unwrap_or(self.lines[self.cursor.y].len());
-
-                                                            self.lines
-                                                                [self.cursor.y]
-                                                                [self.cursor.x + idk..]
-                                                                    .find(char::is_whitespace)
-                                                                    .map_or(self.lines[self.cursor.y].len(), |x| x + idk)
-                                                        } else {
-                                                            self.lines
-                                                                [self.cursor.y]
-                                                                [self.cursor.x..]
-                                                                .find(char::is_whitespace)
-                                                                .map_or(self.lines[self.cursor.y].len(), |x| x)
-                                                        };
+                                                    let right = self.get_right_whitespace_x();
 
                                                     if right == self.lines[self.cursor.y].len() {
                                                         let count = self.lines[self.cursor.y].len() - self.cursor.x;
@@ -707,6 +669,51 @@ impl Editor {
             self.update_cursor();
         } else {
             print!("{CSI}1B");
+        }
+    }
+
+    fn get_right_whitespace_x(&self) -> usize {
+        if self.lines[self.cursor.y].chars().nth(self.cursor.x).unwrap().is_whitespace() {
+            let idk = self.lines
+                [self.cursor.y]
+                [self.cursor.x..]
+                .find(|c: char| !c.is_whitespace())
+                .unwrap_or(self.lines[self.cursor.y].len());
+
+            self.lines
+                [self.cursor.y]
+                [self.cursor.x + idk..]
+                    .find(char::is_whitespace)
+                    .map_or(self.lines[self.cursor.y].len(), |x| x + idk)
+        } else {
+            self.lines
+                [self.cursor.y]
+                [self.cursor.x..]
+                .find(char::is_whitespace)
+                .map_or(self.lines[self.cursor.y].len(), |x| x)
+        }
+    }
+
+    fn get_left_whitespace_x(&self) -> usize {
+        if self.lines[self.cursor.y].chars().nth(self.cursor.x - 1).unwrap().is_whitespace() {
+            self.lines
+                [self.cursor.y]
+                [
+                    ..
+                    self.lines
+                        [self.cursor.y]
+                        [..self.cursor.x - 1]
+                        .rfind(|c: char| !c.is_whitespace())
+                        .unwrap_or(0)
+                ]
+                    .rfind(char::is_whitespace)
+                    .map_or(0, |x| x + 1)
+        } else {
+            self.lines
+                [self.cursor.y]
+                [..self.cursor.x - 1]
+                .rfind(char::is_whitespace)
+                .map_or(0, |x| x + 1)
         }
     }
 
