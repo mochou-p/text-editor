@@ -6,8 +6,9 @@ use libc::{
 };
 
 use std::{
+    collections::HashMap,
     env::args,
-    fs::{create_dir_all, read_to_string, File},
+    fs::{create_dir_all, exists, read_to_string, File},
     io::{stdin, stdout, Error, ErrorKind, Read as _, Write as _},
     mem::zeroed,
     path::Path
@@ -19,6 +20,8 @@ use super::ansi::{
     CSI
 };
 
+
+static CURSOR_POSITIONS_FILE: &str = "cursor_positions.txt";
 
 static FG: &str = "38;2;";
 static BG: &str = "48;2;";
@@ -163,9 +166,19 @@ impl Editor {
         cursor::move_to(1, 2);
         cursor::show();
 
-        if let Some((_, exists)) = self.file {
-            if exists {
+        if let Some((filepath, exists)) = &self.file {
+            if *exists {
                 print!("{}{CSI}0K", self.lines.join(&format!("{CSI}0K{CSI}1E")));
+
+                let file = format!("/home/{}/.local/state/{}/{CURSOR_POSITIONS_FILE}", env!("USER"), env!("CARGO_PKG_NAME"));
+                if let Ok(content) = read_to_string(&file) {
+                    let map = Self::file_to_cursor_positions(content);
+                    if let Some((x, y)) = map.get(filepath) {
+                        self.cursor.x = *x;
+                        self.cursor.y = *y;
+                    }
+                }
+
                 self.update_cursor();
             }
         }
@@ -190,6 +203,7 @@ impl Editor {
                         }
 
                         self.cursor.last_x = self.cursor.x;
+                        self.try_make_dirty();
                     } else {
                         match buffer[0] {
                             8 => {  // Ctrl+Backspace
@@ -208,6 +222,7 @@ impl Editor {
                                     let remainder = &self.lines[self.cursor.y][self.cursor.x..];
                                     print!("{remainder}{}", " ".repeat(old_cursor_x - left));
                                     self.update_cursor();
+                                    self.try_make_dirty();
                                 }
 
                                 self.cursor.last_x = self.cursor.x;
@@ -224,6 +239,7 @@ impl Editor {
                                 }
 
                                 self.cursor.last_x = self.cursor.x;
+                                self.try_make_dirty();
                             },
                             13 => {  // Enter
                                 self.cursor.y += 1;
@@ -242,6 +258,7 @@ impl Editor {
                                 self.update_cursor();
 
                                 self.cursor.last_x = self.cursor.x;
+                                self.try_make_dirty();
                             },
                             19 => {  // Ctrl+S
                                 let Some((filepath, _)) = &self.file else { continue; };
@@ -252,6 +269,7 @@ impl Editor {
 
                                 let mut file    = File::create(filepath).unwrap();
                                 let mut content = self.lines.join("\n");
+                                self.file.as_mut().unwrap().1 = true;
 
                                 if self.lines.len() == 1 && self.lines[0].is_empty() {
                                     file.set_len(0).unwrap();
@@ -269,7 +287,7 @@ impl Editor {
                                     state::normal_screen();
                                     let _ = stdout.flush();
                                     unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
-                                    return;
+                                    break;
                                 }
 
                                 match idklol[0] {
@@ -284,7 +302,7 @@ impl Editor {
                                                     let _ = stdout.flush();
                                                     unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
                                                     eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?}", line!());
-                                                    return;
+                                                    break;
                                                 }
 
                                                 if lolidk[0] != 59 || lolidk[1] != 53 {
@@ -293,7 +311,7 @@ impl Editor {
                                                     let _ = stdout.flush();
                                                     unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
                                                     eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
-                                                    return;
+                                                    break;
                                                 }
 
                                                 match lolidk[2] {
@@ -365,7 +383,7 @@ impl Editor {
                                                         let _  = stdout.flush();
                                                         unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
                                                         eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
-                                                        return;
+                                                        break;
                                                     }
                                                 }
                                             },
@@ -378,7 +396,7 @@ impl Editor {
                                                     let _ = stdout.flush();
                                                     unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
                                                     eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
-                                                    return;
+                                                    break;
                                                 }
 
                                                 match lolidk[0] {
@@ -389,7 +407,7 @@ impl Editor {
                                                             let _ = stdout.flush();
                                                             unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
                                                             eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
-                                                            return;
+                                                            break;
                                                         }
 
                                                         match lolidk[1] {
@@ -400,6 +418,7 @@ impl Editor {
                                                                     let count = len - self.cursor.x;
                                                                     print!("{}", " ".repeat(count));
                                                                     self.update_cursor();
+                                                                    self.try_make_dirty();
                                                                 }
 
                                                                 self.cursor.last_x = self.cursor.x;
@@ -426,6 +445,7 @@ impl Editor {
                                                                     }
 
                                                                     self.update_cursor();
+                                                                    self.try_make_dirty();
                                                                 }
 
                                                                 self.cursor.last_x = self.cursor.x;
@@ -436,7 +456,7 @@ impl Editor {
                                                                 let _ = stdout.flush();
                                                                 unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
                                                                 eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
-                                                                return;
+                                                                break;
                                                             }
                                                         }
                                                     },
@@ -447,7 +467,7 @@ impl Editor {
                                                             let _ = stdout.flush();
                                                             unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
                                                             eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
-                                                            return;
+                                                            break;
                                                         }
 
                                                         self.delete();
@@ -458,7 +478,7 @@ impl Editor {
                                                         let _ = stdout.flush();
                                                         unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
                                                         eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
-                                                        return;
+                                                        break;
                                                     }
                                                 }
                                             },
@@ -519,7 +539,7 @@ impl Editor {
                                                 let _ = stdout.flush();
                                                 unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
                                                 eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?}", line!());
-                                                return;
+                                                break;
                                             }
                                         }
                                     },
@@ -532,7 +552,7 @@ impl Editor {
                                             let _ = stdout.flush();
                                             unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
                                             eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?} ; lolidk={lolidk:?}", line!());
-                                            return;
+                                            break;
                                         }
 
                                         if self.cursor.x != 0 {
@@ -541,6 +561,7 @@ impl Editor {
                                             print!("{}{}", self.lines[self.cursor.y], " ".repeat(self.cursor.x));
                                             self.cursor.x = 0;
                                             self.update_cursor();
+                                            self.try_make_dirty();
                                         }
 
                                         self.cursor.last_x = self.cursor.x;
@@ -551,7 +572,7 @@ impl Editor {
                                         let _ = stdout.flush();
                                         unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
                                         eprintln!("{}: todo: buf={buffer:?} ; idklol={idklol:?}", line!());
-                                        return;
+                                        break;
                                     }
                                 }
                             },
@@ -571,10 +592,74 @@ impl Editor {
                     let _ = stdout.flush();
                     unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const original_termios) };
                     eprintln!("{CSI}{FOREGROUND_RED}error{CSI}{RESET}: `Stdin::read_exact returned \"{err}\"");
-                    return;
+                    break;
                 }
             }
         }
+
+        self.save_cursor_pos();
+    }
+
+    // used to prevent the cursor position from caching for unsaved files
+    fn try_make_dirty(&mut self) {
+        if let Some((_, exists)) = self.file.as_mut() {
+            *exists = false;
+        }
+    }
+
+    fn save_cursor_pos(self) {
+        let dir      = format!("/home/{}/.local/state/{}", env!("USER"), env!("CARGO_PKG_NAME"));
+        let filepath = format!("{dir}/{CURSOR_POSITIONS_FILE}");
+        create_dir_all(dir).unwrap();
+
+        if !exists(&filepath).unwrap() {
+            if let Some((name, exists)) = &self.file {
+                if !exists { return; }
+
+                let map      = HashMap::from([(name.clone(), (self.cursor.x, self.cursor.y))]);
+                let content  = Self::cursor_positions_to_file(map);
+                let mut file = File::create(filepath).unwrap();
+                file.write_all(content.as_bytes()).unwrap();
+            }
+
+            return;
+        }
+
+        if let Some((name, exists)) = &self.file {
+            if !exists { return; }
+
+            let content = read_to_string(&filepath).unwrap();
+            let mut map = Self::file_to_cursor_positions(content);
+            map.insert(name.clone(), (self.cursor.x, self.cursor.y));
+            let new_content = Self::cursor_positions_to_file(map);
+            let mut file    = File::create(filepath).unwrap();
+            file.write_all(new_content.as_bytes()).unwrap();
+        }
+    }
+
+    fn cursor_positions_to_file(map: HashMap<String, (usize, usize)>) -> String {
+        let mut string = String::with_capacity(8192);
+
+        for (filepath, (x, y)) in map {
+            string.push_str(&format!("{filepath}:{x},{y}\n"));
+        }
+
+        string
+    }
+
+    fn file_to_cursor_positions(string: String) -> HashMap<String, (usize, usize)> {
+        let mut map = HashMap::with_capacity(512);
+
+        for line in string.lines() {
+            let colon    = line.rfind(':').unwrap();
+            let comma    = line.rfind(',').unwrap();
+            let filepath = &line[..colon];
+            let x        = line[colon + 1..comma].parse::<usize>().unwrap();
+            let y        = line[comma + 1..     ].parse::<usize>().unwrap();
+            map.insert(String::from(filepath), (x, y));
+        }
+
+        map
     }
 
     fn backspace(&mut self) {
@@ -628,6 +713,7 @@ impl Editor {
         }
 
         self.cursor.last_x = self.cursor.x;
+        self.try_make_dirty();
     }
 
     fn delete(&mut self) {
@@ -667,6 +753,7 @@ impl Editor {
         }
 
         self.cursor.last_x = self.cursor.x;
+        self.try_make_dirty();
     }
 
     fn up(&mut self) {
