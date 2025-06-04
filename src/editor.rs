@@ -231,6 +231,19 @@ impl Editor {
 
                                 self.cursor.last_x = self.cursor.x;
                             },
+                            9 => {  // Tab
+                                const TAB: &str = "    ";
+                                print!("{TAB}");
+                                self.lines[self.cursor.y].insert_str(self.cursor.x, TAB);
+                                self.cursor.x += 4;
+
+                                if self.cursor.x < self.lines[self.cursor.y].len() {
+                                    print!("{}", &self.lines[self.cursor.y][self.cursor.x..]);
+                                    cursor::move_to_x(self.cursor.x + 1);
+                                }
+
+                                self.cursor.last_x = self.cursor.x;
+                            },
                             13 => {  // Enter
                                 self.cursor.y += 1;
                                 self.lines.insert(self.cursor.y, String::with_capacity(256));
