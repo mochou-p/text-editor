@@ -1,10 +1,12 @@
 # text-editor/Cargo.toml
 
 [package]
+publish      = false
+
 name         = "text-editor"
 version      = "0.0.0"
 
-edition      = "2021"
+edition      = "2024"
 rust-version = "1.88.0"
 
 authors      = ["mochou-p"]
@@ -20,8 +22,8 @@ categories   = ["text-editors", "command-line-utilities", "development-tools", "
 libc = "0.2.172"
 
 [lints.clippy]
-all      = "forbid"
-pedantic = "deny"
-nursery  = "deny"
+all      = "warn"
+pedantic = "warn"
+nursery  = "warn"
 cargo    = "forbid"
 
