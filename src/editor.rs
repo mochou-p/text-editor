@@ -14,24 +14,40 @@ use std::{
 use crate::ansi::{cursor, state, clear};
 
 
-pub struct Editor {
-}
-
 #[expect(dead_code, reason = "temporarily only printing")]
 #[derive(Debug)]
 enum Command {
-    Print(u8),
+    Printable(u8),
     Escape,
     Tab,
     Backspace,
     Delete,
     Enter,
+    Insert,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
     ArrowUp,
     ArrowDown,
     ArrowRight,
     ArrowLeft,
     ShiftTab,
     ShiftEnter,
+    ShiftHome,
+    ShiftEnd,
     ShiftArrowUp,
     ShiftArrowDown,
     ShiftArrowRight,
@@ -47,6 +63,8 @@ enum Command {
     CtrlZ,
     CtrlBackspace,
     CtrlDelete,
+    CtrlHome,
+    CtrlEnd,
     CtrlArrowUp,
     CtrlArrowDown,
     CtrlArrowRight,
@@ -74,8 +92,29 @@ enum Command {
     Error(io::Error)
 }
 
+struct Cursor {
+    last_x: usize,
+    x:      usize,
+    y:      usize
+}
+
+pub struct Editor {
+    cursor: Cursor,
+    lines:  Vec<String>
+}
+
 impl Editor {
-    pub fn run() -> io::Result<()> {
+    pub fn new() -> Self {
+        let     cursor = Cursor { last_x: 0, x: 0, y: 0 };
+        let mut lines  = Vec::with_capacity(2048);
+
+        lines.push(String::with_capacity(512));
+
+        Self { cursor, lines }
+    }
+
+    #[expect(clippy::too_many_lines)]
+    pub fn run(mut self) -> io::Result<()> {
         let mut error  = None;
         let mut buffer = [0u8;  1];
         let mut trail  = [0u8; 32];
@@ -93,12 +132,144 @@ impl Editor {
                     error = Some(err);
                     break;
                 },
-                #[cfg(debug_assertions)]
-                other => {
-                    print!("{other:?} -> {{{buffer:?}, {trail:?}}}                         ");
+                Command::Printable(byte) => {
+                    let character = byte as char;
+                    print!("{character}");
+                    if self.cursor.x < self.lines[self.cursor.y].len() {
+                        print!("{}", &self.lines[self.cursor.y][self.cursor.x..]);
+                        cursor::move_to_x(self.cursor.x + 2);
+                    }
+                    stdout.flush()?;
+                    self.lines[self.cursor.y].insert(self.cursor.x, character);
+                    self.cursor.x      += 1;
+                    self.cursor.last_x  = self.cursor.x;
+                },
+                Command::Enter => {
                     cursor::move_to_next_line(1);
                     stdout.flush()?;
+                    self.lines.push(String::with_capacity(512));
+                    self.cursor.y      += 1;
+                    self.cursor.x       = 0;
+                    self.cursor.last_x  = 0;
+                },
+                Command::ArrowLeft => {
+                    if self.cursor.x == 0 {
+                        if self.cursor.y == 0 {
+                            self.cursor.last_x = 0;
+                            continue;
+                        }
+                        self.cursor.y -= 1;
+                        self.cursor.x  = self.lines[self.cursor.y].len();
+                        cursor::move_to(self.cursor.x + 1, self.cursor.y + 1);
+                    } else {
+                        cursor::move_left(1);
+                        self.cursor.x -= 1;
+                    }
+                    self.cursor.last_x = self.cursor.x;
+                    stdout.flush()?;
+                },
+                Command::ArrowRight => {
+                    if self.cursor.x == self.lines[self.cursor.y].len() {
+                        if self.cursor.y == self.lines.len() - 1 {
+                            self.cursor.last_x = self.cursor.x;
+                            continue;
+                        }
+                        self.cursor.y += 1;
+                        self.cursor.x  = 0;
+                        cursor::move_to_next_line(1);
+                    } else {
+                        cursor::move_right(1);
+                        self.cursor.x += 1;
+                    }
+                    self.cursor.last_x = self.cursor.x;
+                    stdout.flush()?;
+                },
+                Command::ArrowUp => {
+                    if self.cursor.y == 0 {
+                        if self.cursor.x == 0 {
+                            continue;
+                        }
+                        self.cursor.x      = 0;
+                        self.cursor.last_x = 0;
+                        cursor::move_to_x(1);
+                    } else {
+                        self.cursor.x  = self.cursor.last_x;
+                        self.cursor.y -= 1;
+                        self.cursor.x  = self.cursor.x.min(self.lines[self.cursor.y].len());
+                        cursor::move_to(self.cursor.x + 1, self.cursor.y + 1);
+                    }
+                    stdout.flush()?;
+                },
+                Command::ArrowDown => {
+                    if self.cursor.y == self.lines.len() - 1 {
+                        if self.cursor.x == self.lines[self.cursor.y].len() {
+                            continue;
+                        }
+                        self.cursor.x      = self.lines[self.cursor.y].len();
+                        self.cursor.last_x = self.cursor.x;
+                        cursor::move_to_x(self.cursor.x + 1);
+                    } else {
+                        self.cursor.x  = self.cursor.last_x;
+                        self.cursor.y += 1;
+                        self.cursor.x  = self.cursor.x.min(self.lines[self.cursor.y].len());
+                        cursor::move_to(self.cursor.x + 1, self.cursor.y + 1);
+                    }
+                    stdout.flush()?;
+                },
+                Command::Home => {
+                    self.cursor.last_x = 0;
+                    if self.cursor.x == 0 {
+                        continue;
+                    }
+                    self.cursor.x = 0;
+                    cursor::move_to_x(1);
+                    stdout.flush()?;
+                },
+                Command::End => {
+                    self.cursor.last_x = self.lines[self.cursor.y].len();
+                    if self.cursor.x == self.lines[self.cursor.y].len() {
+                        continue;
+                    }
+                    self.cursor.x = self.lines[self.cursor.y].len();
+                    cursor::move_to_x(self.cursor.x + 1);
+                    stdout.flush()?;
+                },
+                Command::CtrlHome => {
+                    if self.cursor.y == 0 {
+                        if self.cursor.x != 0 {
+                            self.cursor.x = 0;
+                            cursor::move_to_x(1);
+                            stdout.flush()?;
+                        }
+                        self.cursor.last_x = 0;
+                        continue;
+                    }
+                    cursor::move_up(self.cursor.y);
+                    stdout.flush()?;
+                    self.cursor.y = 0;
+                },
+                Command::CtrlEnd => {
+                    if self.cursor.y == self.lines.len() - 1 {
+                        if self.cursor.x != self.lines[self.cursor.y].len() {
+                            self.cursor.x = self.lines[self.cursor.y].len();
+                            cursor::move_to_x(self.cursor.x + 1);
+                            stdout.flush()?;
+                        }
+                        self.cursor.last_x = self.cursor.x;
+                        continue;
+                    }
+                    cursor::move_down(self.lines.len() - self.cursor.y - 1);
+                    stdout.flush()?;
+                    self.cursor.y = self.lines.len() - 1;
                 }
+                #[cfg(debug_assertions)]
+                other => {
+                    print!("{other:?}, buffer={buffer:?}, trail={trail:?}            ");
+                    cursor::move_to_next_line(1);
+                    print!("{}            ", str::from_utf8(&trail).unwrap());
+                    cursor::move_to_next_line(2);
+                    stdout.flush()?;
+                },
                 #[cfg(not(debug_assertions))]
                 _ => ()
             }
@@ -108,6 +279,12 @@ impl Editor {
         }
 
         restore_terminal(original_termios, &mut stdout)?;
+
+        println!("----- file content -----");
+        for line in self.lines {
+            println!("{line}");
+        }
+        println!("------------------------");
 
         if let Some(err) = error {
             eprintln!("{err}");
@@ -128,10 +305,10 @@ fn get_termios() -> io::Result<libc::termios> {
 }
 
 const fn raw_termios(mut termios: libc::termios) -> libc::termios {
-    termios.c_iflag = 0; // &= !(BRKINT | ICRNL | INPCK | ISTRIP | IXON | INLCR | IGNCR);
-    termios.c_oflag = 0; // &= !(OPOST);
-    termios.c_cflag = CREAD | CS8;
-    termios.c_lflag = 0; // &= !(ECHO | ICANON | IEXTEN | ISIG);
+    termios.c_iflag = 0;           // &= !(BRKINT | ICRNL | INPCK | ISTRIP | IXON | INLCR | IGNCR);
+    termios.c_oflag = 0;           // &= !(OPOST);
+    termios.c_cflag = CREAD | CS8; // |= CREAD | CS8;
+    termios.c_lflag = 0;           // &= !(ECHO | ICANON | IEXTEN | ISIG);
 
     termios
 }
@@ -299,12 +476,11 @@ fn parse_mouse_event(bytes: &[u8]) -> Option<Command> {
 //       i could just read more and more conditionally based on previous bytes, instead of always 32
 #[expect(clippy::too_many_lines)]
 fn blocking_read_to_command<const N: usize>(mut stdin: &Stdin, buffer: &mut [u8; 1], trail: &mut [u8; N]) -> Command {
-    // TODO: could this be shortened by checking bit flags and indexing into a multidimensional array? /shrug
     match stdin.read_exact(buffer) {
         Ok(()) => {
             let cntrl = unsafe { iscntrl(i32::from(buffer[0])) };
             match cntrl {
-                0 => { return Command::Print(buffer[0]); },
+                0 => { return Command::Printable(buffer[0]); },
                 2 => {
                     match buffer[0] {
                         1  => { return Command::CtrlA;         },
@@ -312,7 +488,7 @@ fn blocking_read_to_command<const N: usize>(mut stdin: &Stdin, buffer: &mut [u8;
                         8  => { return Command::CtrlBackspace; },
                         9  => { return Command::Tab;           },
                         13 => { return Command::Enter;         },
-                        17 => { return Command::CtrlQ;         },
+                        17 => { return Command::CtrlQ;         }
                         18 => { return Command::CtrlR;         },
                         19 => { return Command::CtrlS;         },
                         22 => { return Command::CtrlV;         },
@@ -332,20 +508,56 @@ fn blocking_read_to_command<const N: usize>(mut stdin: &Stdin, buffer: &mut [u8;
 
                                             match read_count {
                                                 2 => {
-                                                    if trail[0] == 91 {
+                                                    match trail[0] {
+                                                        79 => {
+                                                            match trail[1] {
+                                                                80 => { return Command::F1; },
+                                                                81 => { return Command::F2; },
+                                                                82 => { return Command::F3; },
+                                                                83 => { return Command::F4; },
+                                                                _ => ()
+                                                            }
+                                                        },
+                                                        91 => {
+                                                            match trail[1] {
+                                                                65 => { return Command::ArrowUp;    },
+                                                                66 => { return Command::ArrowDown;  },
+                                                                67 => { return Command::ArrowRight; },
+                                                                68 => { return Command::ArrowLeft;  },
+                                                                70 => { return Command::End;        },
+                                                                72 => { return Command::Home;       },
+                                                                90 => { return Command::ShiftTab;   },
+                                                                _  => ()
+                                                            }
+                                                        },
+                                                        _ => ()
+                                                    }
+                                                },
+                                                3 => {
+                                                    if trail[0] == 91 && trail[2] == 126 {
                                                         match trail[1] {
-                                                            65 => { return Command::ArrowUp;    },
-                                                            66 => { return Command::ArrowDown;  },
-                                                            67 => { return Command::ArrowRight; },
-                                                            68 => { return Command::ArrowLeft;  },
-                                                            90 => { return Command::ShiftTab;   },
+                                                            50 => { return Command::Insert;   },
+                                                            51 => { return Command::Delete;   },
+                                                            53 => { return Command::PageUp;   },
+                                                            54 => { return Command::PageDown; },
                                                             _  => ()
                                                         }
                                                     }
                                                 },
-                                                3 => {
-                                                    if trail[0..3] == [91, 51, 126] {
-                                                        return Command::Delete;
+                                                4 => {
+                                                    if trail[0] == 91 && trail[3] == 126 {
+                                                        let n = (trail[1] - 48) * 10 + trail[2] - 48;
+                                                        match n {
+                                                            15 => { return Command::F5;  },
+                                                            17 => { return Command::F6;  },
+                                                            18 => { return Command::F7;  },
+                                                            19 => { return Command::F8;  },
+                                                            20 => { return Command::F9;  },
+                                                            21 => { return Command::F10; },
+                                                            23 => { return Command::F11; },
+                                                            24 => { return Command::F12; },
+                                                            _ => ()
+                                                        }
                                                     }
                                                 },
                                                 5 => {
@@ -361,6 +573,8 @@ fn blocking_read_to_command<const N: usize>(mut stdin: &Stdin, buffer: &mut [u8;
                                                                     66 => { return Command::ShiftArrowDown;  },
                                                                     67 => { return Command::ShiftArrowRight; },
                                                                     68 => { return Command::ShiftArrowLeft;  },
+                                                                    70 => { return Command::ShiftEnd;        },
+                                                                    72 => { return Command::ShiftHome;       },
                                                                     _  => ()
                                                                 }
                                                             },
@@ -370,6 +584,8 @@ fn blocking_read_to_command<const N: usize>(mut stdin: &Stdin, buffer: &mut [u8;
                                                                     66 => { return Command::CtrlArrowDown;  },
                                                                     67 => { return Command::CtrlArrowRight; },
                                                                     68 => { return Command::CtrlArrowLeft;  },
+                                                                    70 => { return Command::CtrlEnd;        },
+                                                                    72 => { return Command::CtrlHome;       },
                                                                     _  => ()
                                                                 }
                                                             },

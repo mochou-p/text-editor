@@ -8,6 +8,6 @@ mod editor;
 
 
 fn main() -> std::io::Result<()> {
-    editor::Editor::run()
+    editor::Editor::new().run()
 }
 
