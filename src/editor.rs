@@ -14,18 +14,32 @@ use std::{
 use crate::ansi::{cursor, state, clear};
 
 
-#[expect(dead_code, reason = "temporarily only printing")]
+#[expect(dead_code,            reason = "temporarily only printing")]
+#[expect(non_camel_case_types, reason = "command specializations for mainloop cleanliness")]
 #[derive(Debug)]
 enum Command {
-    Printable(u8),
+    PrintChar(u8),
+    PrintChar_AtLineEnd(u8),
+    PrintChar_AtLineStartOrMiddle(u8),
     Escape,
     Tab,
     Backspace,
+    Backspace_AtLineStart,
+    Backspace_AtLineMiddle,
+    Backspace_AtFirstLineStart,
     Delete,
     Enter,
+    Enter_AtLineStart,
+    Enter_AtLineMiddle,
+    Enter_AtLineEnd,
+    Enter_AtLastLineStart,
+    Enter_AtLastLineMiddle,
+    Enter_AtLastLineEnd,
     Insert,
     Home,
+    Home_AtLineStart,
     End,
+    End_AtLineEnd,
     PageUp,
     PageDown,
     F1,
@@ -41,9 +55,17 @@ enum Command {
     F11,
     F12,
     ArrowUp,
+    ArrowUp_AtFirstLine,
+    ArrowUp_AtFirstLineStart,
     ArrowDown,
+    ArrowDown_AtLastLine,
+    ArrowDown_AtLastLineEnd,
     ArrowRight,
+    ArrowRight_AtLineEnd,
+    ArrowRight_AtLastLineEnd,
     ArrowLeft,
+    ArrowLeft_AtLineStart,
+    ArrowLeft_AtFirstLineStart,
     ShiftTab,
     ShiftEnter,
     ShiftHome,
@@ -64,7 +86,11 @@ enum Command {
     CtrlBackspace,
     CtrlDelete,
     CtrlHome,
+    CtrlHome_AtFirstLine,
+    CtrlHome_AtFirstLineStart,
     CtrlEnd,
+    CtrlEnd_AtLastLine,
+    CtrlEnd_AtLastLineEnd,
     CtrlArrowUp,
     CtrlArrowDown,
     CtrlArrowRight,
@@ -99,198 +125,484 @@ struct Cursor {
 }
 
 pub struct Editor {
+    stdin:  Stdin,
+    stdout: Stdout,
+    buffer: [u8;  1],
+    trail:  [u8; 32],
+    error:  Option<io::Error>,
     cursor: Cursor,
+    // NOTE: what about a gap buffer
     lines:  Vec<String>
 }
 
 impl Editor {
     pub fn new() -> Self {
+        let     stdin  = stdin();
+        let     stdout = stdout();
+        let     buffer = [0u8;  1];
+        let     trail  = [0u8; 32];
+        let     error  = None;
         let     cursor = Cursor { last_x: 0, x: 0, y: 0 };
         let mut lines  = Vec::with_capacity(2048);
 
         lines.push(String::with_capacity(512));
 
-        Self { cursor, lines }
+        Self { stdin, stdout, buffer, trail, error, cursor, lines }
+    }
+
+    pub fn run(mut self) -> io::Result<()> {
+        let original_termios = self.prepare_terminal()?;
+        self.mainloop()?;
+        self.restore_terminal(original_termios)?;
+
+        Ok(())
+    }
+
+    fn prepare_terminal(&mut self) -> io::Result<libc::termios> {
+        let original_termios = get_termios()?;
+        let      new_termios = raw_termios(original_termios);
+
+        set_termios(new_termios)?;
+        state::alternative_screen();
+        state::enable_mouse();
+        clear::whole_screen();
+        cursor::move_to(1, 1);
+        self.stdout.flush()?;
+
+        Ok(original_termios)
+    }
+
+    fn restore_terminal(&mut self, termios: libc::termios) -> io::Result<()> {
+        state::normal_screen();
+        state::disable_mouse();
+        set_termios(termios)?;
+        self.stdout.flush()?;
+
+        Ok(())
     }
 
     #[expect(clippy::too_many_lines)]
-    pub fn run(mut self) -> io::Result<()> {
-        let mut error  = None;
-        let mut buffer = [0u8;  1];
-        let mut trail  = [0u8; 32];
-        let     stdin  = stdin();
-        let mut stdout = stdout();
-
-        let original_termios = prepare_terminal(&mut stdout)?;
-
+    fn mainloop(&mut self) -> io::Result<()> {
         loop {
-            match blocking_read_to_command(&stdin, &mut buffer, &mut trail) {
+            match self.get_command() {
                 Command::Escape => {
                     break;
                 },
+                // -------------------------------------------------------------------------------------
                 Command::Error(err) => {
-                    error = Some(err);
+                    self.error = Some(err);
                     break;
                 },
-                Command::Printable(byte) => {
+                // -------------------------------------------------------------------------------------
+                Command::PrintChar_AtLineStartOrMiddle(byte) => {
                     let character = byte as char;
-                    print!("{character}");
-                    if self.cursor.x < self.lines[self.cursor.y].len() {
-                        print!("{}", &self.lines[self.cursor.y][self.cursor.x..]);
-                        cursor::move_to_x(self.cursor.x + 2);
-                    }
-                    stdout.flush()?;
+                    print!("{character}{}", &self.lines[self.cursor.y][self.cursor.x..]);
+                    cursor::move_to_x(self.cursor.x + 2);
+                    self.stdout.flush()?;
+
                     self.lines[self.cursor.y].insert(self.cursor.x, character);
                     self.cursor.x      += 1;
                     self.cursor.last_x  = self.cursor.x;
                 },
-                Command::Enter => {
+                Command::PrintChar_AtLineEnd(byte) => {
+                    let character = byte as char;
+                    print!("{character}");
+                    self.stdout.flush()?;
+
+                    self.lines[self.cursor.y].push(character);
+                    self.cursor.x      += 1;
+                    self.cursor.last_x  = self.cursor.x;
+                },
+                // -------------------------------------------------------------------------------------
+                Command::Enter_AtLastLineStart => {
+                    clear::right_of_cursor();
+                    cursor::move_down(1);
+                    print!("{}", self.lines[self.cursor.y]);
+                    cursor::move_to_x(1);
+                    self.stdout.flush()?;
+
+                    self.lines.insert(self.cursor.y, String::with_capacity(512));
+                    self.cursor.y += 1;
+                },
+                Command::Enter_AtLastLineMiddle => {
+                    let trail = String::from(self.lines[self.cursor.y].split_at(self.cursor.x).1);
+                    clear::right_of_cursor();
                     cursor::move_to_next_line(1);
-                    stdout.flush()?;
+                    print!("{trail}");
+                    cursor::move_to_x(1);
+                    self.stdout.flush()?;
+
+                    self.lines[self.cursor.y].truncate(self.cursor.x);
+                    self.cursor.y      += 1;
+                    self.lines.insert(self.cursor.y, trail);
+                    self.cursor.x       = 0;
+                    self.cursor.last_x  = 0;
+                },
+                Command::Enter_AtLastLineEnd => {
+                    cursor::move_to_next_line(1);
+                    self.stdout.flush()?;
+
                     self.lines.push(String::with_capacity(512));
                     self.cursor.y      += 1;
                     self.cursor.x       = 0;
                     self.cursor.last_x  = 0;
                 },
-                Command::ArrowLeft => {
-                    if self.cursor.x == 0 {
-                        if self.cursor.y == 0 {
-                            self.cursor.last_x = 0;
-                            continue;
-                        }
-                        self.cursor.y -= 1;
-                        self.cursor.x  = self.lines[self.cursor.y].len();
-                        cursor::move_to(self.cursor.x + 1, self.cursor.y + 1);
-                    } else {
-                        cursor::move_left(1);
-                        self.cursor.x -= 1;
+                Command::Enter_AtLineStart => {
+                    clear::right_of_cursor();
+                    cursor::move_down(1);
+                    print!("{}", self.lines[self.cursor.y]);
+                    clear::right_of_cursor();
+                    for line in &self.lines[self.cursor.y + 1..] {
+                        cursor::move_to_next_line(1);
+                        print!("{line}");
+                        clear::right_of_cursor();
                     }
+                    cursor::move_to(1, self.cursor.y + 2);
+                    self.stdout.flush()?;
+
+                    self.lines.insert(self.cursor.y, String::with_capacity(512));
+                    self.cursor.y += 1;
+                },
+                Command::Enter_AtLineMiddle => {
+                    let trail = String::from(self.lines[self.cursor.y].split_at(self.cursor.x).1);
+                    clear::right_of_cursor();
+                    cursor::move_to_next_line(1);
+                    print!("{trail}");
+                    clear::right_of_cursor();
+                    for line in &self.lines[self.cursor.y + 1..] {
+                        cursor::move_to_next_line(1);
+                        print!("{line}");
+                        clear::right_of_cursor();
+                    }
+                    cursor::move_to(1, self.cursor.y + 2);
+                    self.stdout.flush()?;
+
+                    self.lines[self.cursor.y].truncate(self.cursor.x);
+                    self.cursor.y      += 1;
+                    self.lines.insert(self.cursor.y, trail);
+                    self.cursor.x       = 0;
+                    self.cursor.last_x  = 0;
+                },
+                Command::Enter_AtLineEnd => {
+                    cursor::move_to_next_line(1);
+                    clear::right_of_cursor();
+                    for line in &self.lines[self.cursor.y + 1..] {
+                        cursor::move_to_next_line(1);
+                        print!("{line}");
+                        clear::right_of_cursor();
+                    }
+                    cursor::move_to(1, self.cursor.y + 2);
+                    self.stdout.flush()?;
+
+                    self.cursor.y      += 1;
+                    self.lines.insert(self.cursor.y, String::with_capacity(512));
+                    self.cursor.x       = 0;
+                    self.cursor.last_x  = 0;
+                },
+                // -------------------------------------------------------------------------------------
+                Command::Backspace_AtLineStart => {
+                    let line            = self.lines.remove(self.cursor.y);
+                    self.cursor.y      -= 1;
+                    self.cursor.x       = self.lines[self.cursor.y].len();
+                    self.cursor.last_x  = self.cursor.x;
+                    cursor::move_to(self.cursor.x + 1, self.cursor.y + 1);
+                    print!("{line}");
+                    self.lines[self.cursor.y].push_str(&line);
+                    for line in &self.lines[self.cursor.y + 1..] {
+                        cursor::move_to_next_line(1);
+                        print!("{line}");
+                        clear::right_of_cursor();
+                    }
+                    cursor::move_to_next_line(1);
+                    clear::right_of_cursor();
+                    cursor::move_to(self.cursor.x + 1, self.cursor.y + 1);
+                    self.stdout.flush()?;
+                },
+                Command::Backspace_AtLineMiddle => {
+                    cursor::move_left(1);
+                    print!("{} ", &self.lines[self.cursor.y][self.cursor.x..]);
+                    cursor::move_to_x(self.cursor.x);
+                    self.stdout.flush()?;
+
+                    self.cursor.x      -= 1;
+                    self.cursor.last_x  = self.cursor.x;
+                    self.lines[self.cursor.y].remove(self.cursor.x);
+                },
+                Command::Backspace => {
+                    cursor::move_left(1);
+                    clear::right_of_cursor();
+                    self.stdout.flush()?;
+
+                    self.cursor.x      -= 1;
+                    self.cursor.last_x  = self.cursor.x;
+                    self.lines[self.cursor.y].pop();
+                },
+                // -------------------------------------------------------------------------------------
+                Command::ArrowLeft_AtFirstLineStart => {
+                    self.cursor.last_x = 0;
+                },
+                Command::ArrowLeft_AtLineStart => {
+                    self.cursor.y      -= 1;
+                    self.cursor.x       = self.lines[self.cursor.y].len();
+                    self.cursor.last_x  = self.cursor.x;
+
+                    cursor::move_to(self.cursor.x + 1, self.cursor.y + 1);
+                    self.stdout.flush()?;
+                },
+                Command::ArrowLeft => {
+                    cursor::move_left(1);
+                    self.stdout.flush()?;
+
+                    self.cursor.x      -= 1;
+                    self.cursor.last_x  = self.cursor.x;
+                },
+                // -------------------------------------------------------------------------------------
+                Command::ArrowRight_AtLastLineEnd => {
                     self.cursor.last_x = self.cursor.x;
-                    stdout.flush()?;
+                },
+                Command::ArrowRight_AtLineEnd => {
+                    cursor::move_to_next_line(1);
+                    self.stdout.flush()?;
+
+                    self.cursor.y      += 1;
+                    self.cursor.x       = 0;
+                    self.cursor.last_x  = self.cursor.x;
                 },
                 Command::ArrowRight => {
-                    if self.cursor.x == self.lines[self.cursor.y].len() {
-                        if self.cursor.y == self.lines.len() - 1 {
-                            self.cursor.last_x = self.cursor.x;
-                            continue;
-                        }
-                        self.cursor.y += 1;
-                        self.cursor.x  = 0;
-                        cursor::move_to_next_line(1);
-                    } else {
-                        cursor::move_right(1);
-                        self.cursor.x += 1;
-                    }
-                    self.cursor.last_x = self.cursor.x;
-                    stdout.flush()?;
+                    cursor::move_right(1);
+                    self.stdout.flush()?;
+
+                    self.cursor.x      += 1;
+                    self.cursor.last_x  = self.cursor.x;
+                },
+                // -------------------------------------------------------------------------------------
+                Command::ArrowUp_AtFirstLineStart => {
+                    self.cursor.last_x = 0;
+                },
+                Command::ArrowUp_AtFirstLine => {
+                    cursor::move_to_x(1);
+                    self.stdout.flush()?;
+
+                    self.cursor.x      = 0;
+                    self.cursor.last_x = 0;
                 },
                 Command::ArrowUp => {
-                    if self.cursor.y == 0 {
-                        if self.cursor.x == 0 {
-                            continue;
-                        }
-                        self.cursor.x      = 0;
-                        self.cursor.last_x = 0;
-                        cursor::move_to_x(1);
-                    } else {
-                        self.cursor.x  = self.cursor.last_x;
-                        self.cursor.y -= 1;
-                        self.cursor.x  = self.cursor.x.min(self.lines[self.cursor.y].len());
-                        cursor::move_to(self.cursor.x + 1, self.cursor.y + 1);
-                    }
-                    stdout.flush()?;
+                    self.cursor.y -= 1;
+                    self.cursor.x  = self.cursor.last_x.min(self.lines[self.cursor.y].len());
+
+                    cursor::move_to(self.cursor.x + 1, self.cursor.y + 1);
+                    self.stdout.flush()?;
+                },
+                // -------------------------------------------------------------------------------------
+                Command::ArrowDown_AtLastLineEnd => {
+                    self.cursor.last_x = self.cursor.x;
+                },
+                Command::ArrowDown_AtLastLine => {
+                    self.cursor.x      = self.lines[self.cursor.y].len();
+                    self.cursor.last_x = self.cursor.x;
+
+                    cursor::move_to_x(self.cursor.x + 1);
+                    self.stdout.flush()?;
                 },
                 Command::ArrowDown => {
-                    if self.cursor.y == self.lines.len() - 1 {
-                        if self.cursor.x == self.lines[self.cursor.y].len() {
-                            continue;
-                        }
-                        self.cursor.x      = self.lines[self.cursor.y].len();
-                        self.cursor.last_x = self.cursor.x;
-                        cursor::move_to_x(self.cursor.x + 1);
-                    } else {
-                        self.cursor.x  = self.cursor.last_x;
-                        self.cursor.y += 1;
-                        self.cursor.x  = self.cursor.x.min(self.lines[self.cursor.y].len());
-                        cursor::move_to(self.cursor.x + 1, self.cursor.y + 1);
-                    }
-                    stdout.flush()?;
+                    self.cursor.y += 1;
+                    self.cursor.x  = self.cursor.last_x.min(self.lines[self.cursor.y].len());
+
+                    cursor::move_to(self.cursor.x + 1, self.cursor.y + 1);
+                    self.stdout.flush()?;
+                },
+                // -------------------------------------------------------------------------------------
+                Command::Home_AtLineStart => {
+                    self.cursor.last_x = 0;
                 },
                 Command::Home => {
-                    self.cursor.last_x = 0;
-                    if self.cursor.x == 0 {
-                        continue;
-                    }
-                    self.cursor.x = 0;
                     cursor::move_to_x(1);
-                    stdout.flush()?;
+                    self.stdout.flush()?;
+
+                    self.cursor.x      = 0;
+                    self.cursor.last_x = 0;
+                },
+                // -------------------------------------------------------------------------------------
+                Command::End_AtLineEnd => {
+                    self.cursor.last_x = self.cursor.x;
                 },
                 Command::End => {
-                    self.cursor.last_x = self.lines[self.cursor.y].len();
-                    if self.cursor.x == self.lines[self.cursor.y].len() {
-                        continue;
-                    }
-                    self.cursor.x = self.lines[self.cursor.y].len();
+                    self.cursor.x      = self.lines[self.cursor.y].len();
+                    self.cursor.last_x = self.cursor.x;
+
                     cursor::move_to_x(self.cursor.x + 1);
-                    stdout.flush()?;
+                    self.stdout.flush()?;
+                },
+                // -------------------------------------------------------------------------------------
+                Command::CtrlHome_AtFirstLineStart => {
+                    self.cursor.last_x = 0;
+                },
+                Command::CtrlHome_AtFirstLine => {
+                    cursor::move_to_x(1);
+                    self.stdout.flush()?;
+
+                    self.cursor.x      = 0;
+                    self.cursor.last_x = 0;
                 },
                 Command::CtrlHome => {
-                    if self.cursor.y == 0 {
-                        if self.cursor.x != 0 {
-                            self.cursor.x = 0;
-                            cursor::move_to_x(1);
-                            stdout.flush()?;
-                        }
-                        self.cursor.last_x = 0;
-                        continue;
-                    }
+                    // NOTE: no absolute cursor move Y only
                     cursor::move_up(self.cursor.y);
-                    stdout.flush()?;
+                    self.stdout.flush()?;
+
                     self.cursor.y = 0;
                 },
+                // -------------------------------------------------------------------------------------
+                Command::CtrlEnd_AtLastLineEnd => {
+                    self.cursor.last_x = self.cursor.x;
+                },
+                Command::CtrlEnd_AtLastLine => {
+                    cursor::move_to_x(self.cursor.x + 1);
+                    self.stdout.flush()?;
+
+                    self.cursor.x      = self.lines[self.cursor.y].len();
+                    self.cursor.last_x = self.cursor.x;
+                },
                 Command::CtrlEnd => {
-                    if self.cursor.y == self.lines.len() - 1 {
-                        if self.cursor.x != self.lines[self.cursor.y].len() {
-                            self.cursor.x = self.lines[self.cursor.y].len();
-                            cursor::move_to_x(self.cursor.x + 1);
-                            stdout.flush()?;
-                        }
-                        self.cursor.last_x = self.cursor.x;
-                        continue;
-                    }
+                    // NOTE: no absolute cursor move Y only
                     cursor::move_down(self.lines.len() - self.cursor.y - 1);
-                    stdout.flush()?;
+                    self.stdout.flush()?;
+
                     self.cursor.y = self.lines.len() - 1;
-                }
+                },
+                // -------------------------------------------------------------------------------------
                 #[cfg(debug_assertions)]
                 other => {
-                    print!("{other:?}, buffer={buffer:?}, trail={trail:?}            ");
+                    print!("{other:?}, buffer={:?}, trail={:?}            ", self.buffer, self.trail);
                     cursor::move_to_next_line(1);
-                    print!("{}            ", str::from_utf8(&trail).unwrap());
+                    print!("{}            ", str::from_utf8(&self.trail).unwrap());
                     cursor::move_to_next_line(2);
-                    stdout.flush()?;
-                },
+                    self.stdout.flush()?;
+                }
                 #[cfg(not(debug_assertions))]
                 _ => ()
             }
 
-            buffer = [0u8;  1];
-            trail  = [0u8; 32];
-        }
-
-        restore_terminal(original_termios, &mut stdout)?;
-
-        println!("----- file content -----");
-        for line in self.lines {
-            println!("{line}");
-        }
-        println!("------------------------");
-
-        if let Some(err) = error {
-            eprintln!("{err}");
+            self.buffer = [0u8;  1];
+            self.trail  = [0u8; 32];
         }
 
         Ok(())
+    }
+
+    fn get_command(&mut self) -> Command {
+        let command = blocking_read_to_command(&self.stdin, &mut self.buffer, &mut self.trail);
+
+        match command {
+            Command::PrintChar(byte) => {
+                if self.cursor.x < self.lines[self.cursor.y].len() {
+                    return Command::PrintChar_AtLineStartOrMiddle(byte);
+                }
+                return Command::PrintChar_AtLineEnd(byte);
+            },
+            Command::Backspace => {
+                if self.cursor.x == 0 {
+                    if self.cursor.y == 0 {
+                        return Command::Backspace_AtFirstLineStart;
+                    }
+                    return Command::Backspace_AtLineStart;
+                } else if self.cursor.x != self.lines[self.cursor.y].len() {
+                    return Command::Backspace_AtLineMiddle;
+                }
+            },
+            Command::Enter => {
+                if self.cursor.y == self.lines.len() - 1 {
+                    if self.cursor.x == self.lines[self.cursor.y].len() {
+                        return Command::Enter_AtLastLineEnd;
+                    }
+                    if self.cursor.x == 0 {
+                        return Command::Enter_AtLastLineStart;
+                    }
+                    return Command::Enter_AtLastLineMiddle;
+                }
+                if self.cursor.x == self.lines[self.cursor.y].len() {
+                    return Command::Enter_AtLineEnd;
+                }
+                if self.cursor.x == 0 {
+                    return Command::Enter_AtLineStart;
+                }
+                return Command::Enter_AtLineMiddle;
+            },
+            Command::ArrowLeft => {
+                if self.cursor.x == 0 {
+                    if self.cursor.y == 0 {
+                        return Command::ArrowLeft_AtFirstLineStart;
+                    }
+                    return Command::ArrowLeft_AtLineStart;
+                }
+            },
+            Command::ArrowRight => {
+                if self.cursor.x == self.lines[self.cursor.y].len() {
+                    if self.cursor.y == self.lines.len() - 1 {
+                        return Command::ArrowRight_AtLastLineEnd;
+                    }
+                    return Command::ArrowRight_AtLineEnd;
+                }
+            },
+            Command::ArrowUp => {
+                if self.cursor.y == 0 {
+                    if self.cursor.x == 0 {
+                        return Command::ArrowUp_AtFirstLineStart;
+                    }
+                    return Command::ArrowUp_AtFirstLine;
+                }
+            },
+            Command::ArrowDown => {
+                if self.cursor.y == self.lines.len() - 1 {
+                    if self.cursor.x == self.lines[self.cursor.y].len() {
+                        return Command::ArrowDown_AtLastLineEnd;
+                    }
+                    return Command::ArrowDown_AtLastLine;
+                }
+            },
+            Command::Home => {
+                if self.cursor.x == 0 {
+                    return Command::Home_AtLineStart;
+                }
+            },
+            Command::End => {
+                if self.cursor.x == self.lines[self.cursor.y].len() {
+                    return Command::End_AtLineEnd;
+                }
+            },
+            Command::CtrlHome => {
+                if self.cursor.y == 0 {
+                    if self.cursor.x == 0 {
+                        return Command::CtrlHome_AtFirstLineStart;
+                    }
+                    return Command::CtrlHome_AtFirstLine;
+                }
+            },
+            Command::CtrlEnd => {
+                if self.cursor.y == self.lines.len() - 1 {
+                    if self.cursor.x == self.lines[self.cursor.y].len() {
+                        return Command::CtrlEnd_AtLastLineEnd;
+                    }
+                    return Command::CtrlEnd_AtLastLine;
+                }
+            },
+            _ => ()
+        }
+
+        command
+    }
+}
+
+impl Drop for Editor {
+    fn drop(&mut self) {
+        println!("---------- file content ----------");
+        for (i, line) in self.lines.iter().enumerate() {
+            println!("{:0>4}: {line}", i + 1);
+        }
+        println!("----------------------------------");
+
+        if let Some(err) = &self.error {
+            eprintln!("\x1b[31merror:\x1b[0m {err}");
+        }
     }
 }
 
@@ -317,31 +629,6 @@ fn set_termios(termios: libc::termios) -> io::Result<()> {
     if unsafe { tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw const termios) } != 0 {
         return Err(io::Error::last_os_error());
     }
-
-    Ok(())
-}
-
-fn prepare_terminal(stdout: &mut Stdout) -> io::Result<libc::termios> {
-    let original_termios = get_termios()?;
-    let      new_termios = raw_termios(original_termios);
-
-    set_termios(new_termios)?;
-    state::alternative_screen();
-    state::enable_mouse();
-    clear::whole_screen();
-    cursor::move_to(1, 1);
-
-    stdout.flush()?;
-
-    Ok(original_termios)
-}
-
-fn restore_terminal(termios: libc::termios, stdout: &mut Stdout) -> io::Result<()> {
-    state::normal_screen();
-    state::disable_mouse();
-    set_termios(termios)?;
-
-    stdout.flush()?;
 
     Ok(())
 }
@@ -480,7 +767,7 @@ fn blocking_read_to_command<const N: usize>(mut stdin: &Stdin, buffer: &mut [u8;
         Ok(()) => {
             let cntrl = unsafe { iscntrl(i32::from(buffer[0])) };
             match cntrl {
-                0 => { return Command::Printable(buffer[0]); },
+                0 => { return Command::PrintChar(buffer[0]); },
                 2 => {
                     match buffer[0] {
                         1  => { return Command::CtrlA;         },
@@ -488,7 +775,7 @@ fn blocking_read_to_command<const N: usize>(mut stdin: &Stdin, buffer: &mut [u8;
                         8  => { return Command::CtrlBackspace; },
                         9  => { return Command::Tab;           },
                         13 => { return Command::Enter;         },
-                        17 => { return Command::CtrlQ;         }
+                        17 => { return Command::CtrlQ;         },
                         18 => { return Command::CtrlR;         },
                         19 => { return Command::CtrlS;         },
                         22 => { return Command::CtrlV;         },
