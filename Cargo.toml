@@ -2,13 +2,10 @@
 
 [package]
 publish      = false
-
 name         = "text-editor"
 version      = "0.0.0"
-
 edition      = "2024"
-rust-version = "1.88.0"
-
+rust-version = "1.92.0"
 authors      = ["mochou-p"]
 description  = "simple text-based text editor"
 readme       = "README.md"
@@ -19,7 +16,7 @@ keywords     = ["editor", "text", "text-editor", "text-based"]
 categories   = ["text-editors", "command-line-utilities", "development-tools", "filesystem"]
 
 [dependencies]
-libc = "0.2.172"
+termion = "4.0.5"
 
 [lints.clippy]
 all      = "warn"
