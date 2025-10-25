@@ -141,13 +141,14 @@ impl Editor {
             self.lines.push(String::with_capacity(128));
         } else {
             self.lines[self.cursor.y].insert(self.cursor.x, c);
-            self.cursor.x += 1;
+            self.cursor.x      += 1;
+            self.cursor.last_x  = self.cursor.x
         }
     }
 
     fn char_into_raw_print(&mut self, c: char) -> String {
         if c == '\n' {
-            self.move_cursor_to_next_line().into()
+            self.move_cursor_to_new_line().into()
         } else {
             format!(
                 "{c}{}{}",
@@ -170,28 +171,40 @@ impl Editor {
     fn move_cursor_up(&mut self) -> Option<cursor::Goto> {
         if self.cursor.y == 0 {
             if self.cursor.x == 0 {
+                self.cursor.last_x = 0;
                 return None;
             }
 
             self.cursor.x = 0;
+            self.cursor.last_x = self.cursor.x;
         } else {
             self.cursor.y -= 1;
-            self.cursor.x.to_min_with(self.lines[self.cursor.y].len());
+
+            self.cursor.x
+                .to_max_with(self.cursor.last_x)
+                .to_min_with(self.lines[self.cursor.y].len());
         }
 
         Some(self.update_cursor_position())
     }
 
     fn move_cursor_down(&mut self) -> Option<cursor::Goto> {
+        let current_line_len = self.lines[self.cursor.y].len();
+
         if self.cursor.y == self.lines.len() - 1 {
-            if self.cursor.x == self.lines[self.cursor.y].len() {
+            if self.cursor.x == current_line_len {
+                self.cursor.last_x = current_line_len;
                 return None;
             }
 
-            self.cursor.x = self.lines[self.cursor.y].len();
+            self.cursor.x      = self.lines[self.cursor.y].len();
+            self.cursor.last_x = self.cursor.x;
         } else {
             self.cursor.y += 1;
-            self.cursor.x.to_min_with(self.lines[self.cursor.y].len());
+
+            self.cursor.x
+                .to_max_with(self.cursor.last_x)
+                .to_min_with(self.lines[self.cursor.y].len());
         }
 
         Some(self.update_cursor_position())
@@ -200,6 +213,7 @@ impl Editor {
     fn move_cursor_left(&mut self) -> Option<cursor::Goto> {
         if self.cursor.x == 0 {
             if self.cursor.y == 0 {
+                self.cursor.last_x = 0;
                 return None;
             }
 
@@ -209,41 +223,55 @@ impl Editor {
             self.cursor.x -= 1;
         }
 
+        self.cursor.last_x = self.cursor.x;
+
         Some(self.update_cursor_position())
     }
 
     fn move_cursor_right(&mut self) -> Option<cursor::Goto> {
-        if self.cursor.x == self.lines[self.cursor.y].len() {
+        let current_line_len = self.lines[self.cursor.y].len();
+
+        if self.cursor.x == current_line_len {
             if self.cursor.y == self.lines.len() - 1 {
+                self.cursor.last_x = current_line_len;
                 return None;
             }
 
-            self.cursor.y += 1;
-            self.cursor.x  = 0;
+            self.cursor.y      += 1;
+            self.cursor.x       = 0;
+            self.cursor.last_x  = 0;
         } else {
-            self.cursor.x += 1;
+            self.cursor.x      += 1;
+            self.cursor.last_x  = self.cursor.x;
         }
 
         Some(self.update_cursor_position())
     }
 
-    // TODO: refactor this to get rid of the note
-    // NOTE: beware when using this from another helper,
-    //       it will always move down, so dont use it
-    //       from a call that can be bound by self.lines.len()
-    fn move_cursor_to_next_line(&mut self) -> cursor::Goto {
-        self.cursor.x  = 0;
-        self.cursor.y += 1;
+    fn move_cursor_to_new_line(&mut self) -> cursor::Goto {
+        self.cursor.y      += 1;
+        self.cursor.x       = 0;
+        self.cursor.last_x  = 0;
 
         self.update_cursor_position()
     }
 }
 
 trait ToMinWith: Ord + Copy {
-    fn to_min_with(&mut self, rhs: Self) {
+    fn to_min_with(&mut self, rhs: Self) -> &mut Self {
         *self = (*self).min(rhs);
+        self
     }
 }
 
 impl ToMinWith for usize {}
+
+trait ToMaxWith: Ord + Copy {
+    fn to_max_with(&mut self, rhs: Self) -> &mut Self {
+        *self = (*self).max(rhs);
+        self
+    }
+}
+
+impl ToMaxWith for usize {}
 
