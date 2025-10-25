@@ -2,7 +2,8 @@
 
 use std::io::{self, Stdout, Write as _};
 
-use termion::{clear, color, cursor};
+use termion::{clear, cursor};
+use termion::color::{self, Color};
 use termion::event::{Event, Key, MouseEvent};
 use termion::input::{MouseTerminal, TermRead as _};
 use termion::screen::{AlternateScreen, IntoAlternateScreen as _};
@@ -99,7 +100,7 @@ impl Editor {
         }
     }
 
-    fn handle_mouse_event(_mouse_event: MouseEvent) -> bool {
+    const fn handle_mouse_event(_mouse_event: MouseEvent) -> bool {
         false
     }
 }
@@ -130,7 +131,118 @@ impl Editor {
         write!(self.stdout, "{printable}").unwrap();
         self.stdout.flush().unwrap();
 
+        self.try_refresh_colors();
+
         false
+    }
+}
+
+struct Word {
+    start: usize,
+    end:   usize
+}
+
+impl Word {
+    const fn from(line_start: usize, start: usize, end: usize) -> Self {
+        Self {
+            start: line_start + start,
+            end:   line_start + end
+        }
+    }
+}
+
+// coloring helpers
+impl Editor {
+    // TODO: correctly remove color
+    fn try_refresh_colors(&mut self) {
+        let words = self.parse_current_line_into_words();
+
+        for word in words {
+            self.try_colorise_word(word);
+        }
+
+        write!(
+            self.stdout,
+            "{}{}",
+            self.update_cursor_position(),
+            color::Fg(color::Reset)
+        ).unwrap();
+
+        self.stdout.flush().unwrap();
+    }
+
+    fn try_colorise_word(&mut self, word: Word) {
+        let line = &self.lines[self.cursor.y];
+        let text = &line[word.start..word.end];
+
+        let Some(color) = Self::get_text_color(text) else {
+            return;
+        };
+
+        write!(
+            self.stdout,
+            "{}{}{text}",
+            cursor::Goto(
+                u16::try_from(word.start    + 1).unwrap(),
+                u16::try_from(self.cursor.y + 1).unwrap()
+            ),
+            color::Fg(color)
+        ).unwrap();
+    }
+
+    fn get_text_color(text: &str) -> Option<&dyn Color> {
+        match text {
+            "macro_rules!" | "unsafe"
+                => Some(&color::Red),
+            "bool" | "char" | "const" | "f32" | "f64" | "i8" | "i16" | "i32" | "i64" | "i128"
+            | "isize" | "move" | "mut" | "ref" | "Self" | "static" | "str" | "String" | "u8"
+            | "u16" | "u32" | "u64" | "u128" | "usize"
+                => Some(&color::Yellow),
+            "as" | "Err" | "false" | "None" | "Result" | "self" | "Some" | "true"
+                => Some(&color::Cyan),
+            "break" | "continue" | "crate" | "else" | "enum" | "extern" | "fn" | "for" | "if"
+            | "impl" | "in" | "let" | "loop" | "match" | "mod" | "pub" | "return" | "struct"
+            | "super" | "trait" | "type" | "use" | "where" | "while" | "async" | "await" | "dyn"
+                => Some(&color::Blue),
+            _
+                => None
+        }
+    }
+
+    // NOTE: doing this on every keystroke is quite redundant, but fine for now cause its simple
+    // TODO: refactor to allow for a more complex coloring system
+    fn parse_current_line_into_words(&self) -> Vec<Word> {
+        let mut words      = Vec::with_capacity(128);
+        let     line       = &self.lines[self.cursor.y];
+        let mut line_start = 0;
+
+        loop {
+            let slice = &line[line_start..];
+
+            let Some(start) = slice.find(|c: char| !c.is_whitespace()) else {
+                // TODO: but why do i only get here once when spamming [Enter]?
+                break;
+            };
+
+            let from_word_start = &slice[start..];
+            let word_len_option = from_word_start.find(|c: char| c.is_whitespace());
+
+            if let Some(len) = word_len_option {
+                let end  = start + len;
+                let word = Word::from(line_start, start, end);
+
+                words.push(word);
+                line_start += end;
+            } else {
+                let end  = start + from_word_start.len();
+                let word = Word::from(line_start, start, end);
+
+                words.push(word);
+                break;
+            }
+        }
+
+        words
     }
 }
 
@@ -142,7 +254,7 @@ impl Editor {
         } else {
             self.lines[self.cursor.y].insert(self.cursor.x, c);
             self.cursor.x      += 1;
-            self.cursor.last_x  = self.cursor.x
+            self.cursor.last_x  = self.cursor.x;
         }
     }
 
