@@ -175,18 +175,21 @@ impl Editor {
         let line = &self.lines[self.cursor.y];
         let text = &line[word.start..word.end];
 
-        let Some(color) = Self::get_text_color(text) else {
-            return;
-        };
+        let color = color::Fg({
+            if let Some(color) = Self::get_text_color(text) {
+                color
+            } else {
+                &color::Reset
+            }
+        });
 
         write!(
             self.stdout,
-            "{}{}{text}",
+            "{}{color}{text}",
             cursor::Goto(
                 u16::try_from(word.start    + 1).unwrap(),
                 u16::try_from(self.cursor.y + 1).unwrap()
-            ),
-            color::Fg(color)
+            )
         ).unwrap();
     }
 
