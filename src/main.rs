@@ -2,7 +2,7 @@
 
 use std::io::{self, Stdout, Write as _};
 
-use termion::{clear, cursor};
+use termion::{clear, cursor, scroll};
 use termion::color::{self, Color};
 use termion::event::{Event, Key, MouseEvent};
 use termion::input::{MouseTerminal, TermRead as _};
@@ -95,9 +95,12 @@ impl Editor {
         match key {
             Key::Up | Key::Down | Key::Left | Key::Right => self.handle_arrow_key(key),
             Key::Char(c)                                 => self.handle_char_key(c),
-            Key::Esc                                     => true,
-            _                                            => false
+            Key::Backspace                               => self.handle_backspace(),
+            Key::Esc                                     => { return true; },
+            _                                            => ()
         }
+
+        false
     }
 
     const fn handle_mouse_event(_mouse_event: MouseEvent) -> bool {
@@ -107,7 +110,7 @@ impl Editor {
 
 // key event handlers
 impl Editor {
-    fn handle_arrow_key(&mut self, arrow_key: Key) -> bool {
+    fn handle_arrow_key(&mut self, arrow_key: Key) {
         let printable_option = match arrow_key {
             Key::Up    => Some(self.move_cursor_up()),
             Key::Down  => Some(self.move_cursor_down()),
@@ -120,20 +123,68 @@ impl Editor {
             write!(self.stdout, "{printable}").unwrap();
             self.stdout.flush().unwrap();
         }
-
-        false
     }
 
-    fn handle_char_key(&mut self, c: char) -> bool {
+    fn handle_char_key(&mut self, c: char) {
         self.insert_char(c);
 
         let printable = self.char_into_raw_print(c);
         write!(self.stdout, "{printable}").unwrap();
-        self.stdout.flush().unwrap();
 
         self.try_refresh_colors();
+    }
 
-        false
+    fn handle_backspace(&mut self) {
+        if self.cursor.x == 0 {
+            if self.cursor.y == 0 {
+                self.cursor.last_x = 0;
+                return;
+            }
+
+            self.wrapping_backspace();
+        } else {
+            self.normal_backspace();
+        }
+
+        self.try_refresh_colors();
+    }
+}
+
+// backspace helpers
+impl Editor {
+    fn normal_backspace(&mut self) {
+        self.cursor.x      -= 1;
+        self.cursor.last_x  = self.cursor.x;
+
+        self.lines[self.cursor.y].remove(self.cursor.x);
+
+        write!(
+            self.stdout,
+            "{}{} {}",
+            cursor::Left(1),
+            &self.lines[self.cursor.y][self.cursor.x..],
+            self.update_cursor_position()
+        ).unwrap();
+    }
+
+    fn wrapping_backspace(&mut self) {
+        let moved_line = self.lines.remove(self.cursor.y);
+
+        self.cursor.y      -= 1;
+        self.cursor.x       = self.lines[self.cursor.y].len();
+        self.cursor.last_x  = self.cursor.x;
+
+        self.lines[self.cursor.y]
+            .push_str(&moved_line);
+
+        // TODO: make scrolling region end equal term height, not 200
+        write!(
+            self.stdout,
+            "\x1b[{};200r{}\x1b[r{}{moved_line}",
+            self.cursor.y + 1,
+            scroll::Up(1),
+            self.update_cursor_position()
+        ).unwrap();
     }
 }
 
@@ -153,7 +204,6 @@ impl Word {
 
 // coloring helpers
 impl Editor {
-    // TODO: correctly remove color
     fn try_refresh_colors(&mut self) {
         let words = self.parse_current_line_into_words();
 
@@ -175,13 +225,10 @@ impl Editor {
         let line = &self.lines[self.cursor.y];
         let text = &line[word.start..word.end];
 
-        let color = color::Fg({
-            if let Some(color) = Self::get_text_color(text) {
-                color
-            } else {
-                &color::Reset
-            }
-        });
+        let color = color::Fg(
+            Self::get_text_color(text)
+                .unwrap_or(&color::Reset)
+        );
 
         write!(
             self.stdout,
@@ -213,7 +260,6 @@ impl Editor {
     }
 
     // NOTE: doing this on every keystroke is quite redundant, but fine for now cause its simple
-    // TODO: refactor to allow for a more complex coloring system
     fn parse_current_line_into_words(&self) -> Vec<Word> {
         let mut words      = Vec::with_capacity(128);
         let     line       = &self.lines[self.cursor.y];
@@ -253,7 +299,7 @@ impl Editor {
 impl Editor {
     fn insert_char(&mut self, c: char) {
         if c == '\n' {
-            self.lines.push(String::with_capacity(128));
+            self.lines.insert(self.cursor.y + 1, String::with_capacity(128));
         } else {
             self.lines[self.cursor.y].insert(self.cursor.x, c);
             self.cursor.x      += 1;
@@ -263,7 +309,13 @@ impl Editor {
 
     fn char_into_raw_print(&mut self, c: char) -> String {
         if c == '\n' {
-            self.move_cursor_to_new_line().into()
+            // TODO: make scrolling region end equal term height, not 200
+            format!(
+                "{}\x1b[{};200r{}\x1b[r",
+                self.move_cursor_to_new_line(),
+                self.cursor.y + 1,
+                scroll::Down(1)
+            )
         } else {
             format!(
                 "{c}{}{}",
