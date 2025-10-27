@@ -93,11 +93,12 @@ impl Editor {
 
     fn handle_key_event(&mut self, key: Key) -> bool { 
         match key {
-            Key::Up | Key::Down | Key::Left | Key::Right => self.handle_arrow_key(key),
-            Key::Char(c)                                 => self.handle_char_key(c),
-            Key::Backspace                               => self.handle_backspace(),
-            Key::Esc                                     => { return true; },
-            _                                            => ()
+            Key::Up | Key::Down | Key::Left | Key::Right        => self.handle_arrow_key(key),
+            Key::Home | Key::End | Key::CtrlHome | Key::CtrlEnd => self.handle_edge_key(key),
+            Key::Char(c)                                        => self.handle_char_key(c),
+            Key::Backspace                                      => self.handle_backspace(),
+            Key::Esc                                            => { return true; },
+            _                                                   => ()
         }
 
         false
@@ -111,7 +112,7 @@ impl Editor {
 // key event handlers
 impl Editor {
     fn handle_arrow_key(&mut self, arrow_key: Key) {
-        let printable_option = match arrow_key {
+        let printable_option2 = match arrow_key {
             Key::Up    => Some(self.move_cursor_up()),
             Key::Down  => Some(self.move_cursor_down()),
             Key::Left  => Some(self.move_cursor_left()),
@@ -119,7 +120,22 @@ impl Editor {
             _          => None
         };
 
-        if let Some(Some(printable)) = printable_option {
+        if let Some(Some(printable)) = printable_option2 {
+            write!(self.stdout, "{printable}").unwrap();
+            self.stdout.flush().unwrap();
+        }
+    }
+    
+    fn handle_edge_key(&mut self, edge_key: Key) {
+        let printable_option2 = match edge_key {
+            Key::Home     => Some(self.move_cursor_to_horizontal_start()),
+            Key::End      => Some(self.move_cursor_to_horizontal_end()),
+            Key::CtrlHome => Some(self.move_cursor_to_vertical_start()),
+            Key::CtrlEnd  => Some(self.move_cursor_to_vertical_end()),
+            _             => None
+        };
+
+        if let Some(Some(printable)) = printable_option2 {
             write!(self.stdout, "{printable}").unwrap();
             self.stdout.flush().unwrap();
         }
@@ -128,7 +144,7 @@ impl Editor {
     fn handle_char_key(&mut self, c: char) {
         self.insert_char(c);
 
-        let printable = self.char_into_raw_print(c);
+        let printable = self.print_char(c);
         write!(self.stdout, "{printable}").unwrap();
 
         self.try_refresh_colors();
@@ -299,7 +315,7 @@ impl Editor {
 impl Editor {
     fn insert_char(&mut self, c: char) {
         if c == '\n' {
-            self.lines.insert(self.cursor.y + 1, String::with_capacity(128));
+            self.new_line();
         } else {
             self.lines[self.cursor.y].insert(self.cursor.x, c);
             self.cursor.x      += 1;
@@ -307,7 +323,7 @@ impl Editor {
         }
     }
 
-    fn char_into_raw_print(&mut self, c: char) -> String {
+    fn print_char(&mut self, c: char) -> String {
         if c == '\n' {
             // TODO: make scrolling region end equal term height, not 200
             format!(
@@ -326,6 +342,14 @@ impl Editor {
     }
 }
 
+// new line helpers
+impl Editor {
+    fn new_line(&mut self) {
+        // TODO: also handle cursor not at the end correctly
+        self.lines.insert(self.cursor.y + 1, String::with_capacity(128));
+    }
+}
+
 // cursor helpers
 impl Editor {
     fn update_cursor_position(&self) -> cursor::Goto {
@@ -333,6 +357,60 @@ impl Editor {
             u16::try_from(self.cursor.x + 1).unwrap(),
             u16::try_from(self.cursor.y + 1).unwrap()
         )
+    }
+
+    fn move_cursor_to_horizontal_start(&mut self) -> Option<cursor::Goto> {
+        self.cursor.last_x = 0;
+
+        if self.cursor.x == 0 {
+            return None;
+        }
+
+        self.cursor.x = 0;
+
+        Some(self.update_cursor_position())
+    }
+
+    fn move_cursor_to_horizontal_end(&mut self) -> Option<cursor::Goto> {
+        self.cursor.last_x = self.lines[self.cursor.y].len();
+
+        if self.cursor.x == self.cursor.last_x {
+            return None;
+        }
+
+        self.cursor.x = self.cursor.last_x;
+
+        Some(self.update_cursor_position())
+    }
+
+    fn move_cursor_to_vertical_start(&mut self) -> Option<cursor::Goto> {
+        if self.cursor.y == 0 {
+            return None;
+        }
+
+        self.cursor.y = 0;
+
+        self.cursor.x
+            .to_max_with(self.cursor.last_x)
+            .to_min_with(self.lines[self.cursor.y].len());
+
+        Some(self.update_cursor_position())
+    }
+
+    fn move_cursor_to_vertical_end(&mut self) -> Option<cursor::Goto> {
+        let last_line_i = self.lines.len() - 1;
+
+        if self.cursor.y == last_line_i {
+            return None;
+        }
+
+        self.cursor.y = last_line_i;
+
+        self.cursor.x
+            .to_max_with(self.cursor.last_x)
+            .to_min_with(self.lines[self.cursor.y].len());
+
+        Some(self.update_cursor_position())
     }
 
     fn move_cursor_up(&mut self) -> Option<cursor::Goto> {
