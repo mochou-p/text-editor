@@ -275,7 +275,7 @@ impl Editor {
         }
     }
 
-    // NOTE: doing this on every keystroke is quite redundant, but fine for now cause its simple
+    // TODO: only reparse the current word
     fn parse_current_line_into_words(&self) -> Vec<Word> {
         let mut words      = Vec::with_capacity(128);
         let     line       = &self.lines[self.cursor.y];
@@ -315,7 +315,8 @@ impl Editor {
 impl Editor {
     fn insert_char(&mut self, c: char) {
         if c == '\n' {
-            self.new_line();
+            let trail = self.lines[self.cursor.y].split_off(self.cursor.x);
+            self.lines.insert(self.cursor.y + 1, trail);
         } else {
             self.lines[self.cursor.y].insert(self.cursor.x, c);
             self.cursor.x      += 1;
@@ -327,7 +328,8 @@ impl Editor {
         if c == '\n' {
             // TODO: make scrolling region end equal term height, not 200
             format!(
-                "{}\x1b[{};200r{}\x1b[r",
+                "{}{}\x1b[{};200r{}\x1b[r",
+                clear::UntilNewline,
                 self.move_cursor_to_new_line(),
                 self.cursor.y + 1,
                 scroll::Down(1)
@@ -339,14 +341,6 @@ impl Editor {
                 self.update_cursor_position()
             )
         }
-    }
-}
-
-// new line helpers
-impl Editor {
-    fn new_line(&mut self) {
-        // TODO: also handle cursor not at the end correctly
-        self.lines.insert(self.cursor.y + 1, String::with_capacity(128));
     }
 }
 
