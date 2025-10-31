@@ -93,12 +93,16 @@ impl Editor {
 
     fn handle_key_event(&mut self, key: Key) -> bool { 
         match key {
-            Key::Up | Key::Down | Key::Left | Key::Right        => self.handle_arrow_key(key),
-            Key::Home | Key::End | Key::CtrlHome | Key::CtrlEnd => self.handle_edge_key(key),
-            Key::Char(c)                                        => self.handle_char_key(c),
-            Key::Backspace                                      => self.handle_backspace(),
-            Key::Esc                                            => { return true; },
-            _                                                   => ()
+            Key::Up | Key::Down | Key::Left | Key::Right
+                => self.handle_arrow_key(key),
+            Key::CtrlLeft | Key::CtrlRight
+                => self.handle_word_key(key),
+            Key::Home | Key::End | Key::CtrlHome | Key::CtrlEnd
+                => self.handle_edge_key(key),
+            Key::Char(c)   => self.handle_char_key(c),
+            Key::Backspace => self.handle_backspace(),
+            Key::Esc       => { return true; },
+            _              => ()
         }
 
         false
@@ -118,6 +122,19 @@ impl Editor {
             Key::Left  => Some(self.move_cursor_left()),
             Key::Right => Some(self.move_cursor_right()),
             _          => None
+        };
+
+        if let Some(Some(printable)) = printable_option2 {
+            write!(self.stdout, "{printable}").unwrap();
+            self.stdout.flush().unwrap();
+        }
+    }
+
+    fn handle_word_key(&mut self, word_key: Key) {
+        let printable_option2 = match word_key {
+            Key::CtrlLeft  => Some(self.move_cursor_to_prev_word()),
+            Key::CtrlRight => Some(self.move_cursor_to_next_word()),
+            _              => None
         };
 
         if let Some(Some(printable)) = printable_option2 {
@@ -337,6 +354,7 @@ impl Editor {
         } else {
             format!(
                 "{c}{}{}",
+                // TODO: non-ascii = panic, most probably everywhere else also
                 &self.lines[self.cursor.y][self.cursor.x..],
                 self.update_cursor_position()
             )
@@ -485,6 +503,38 @@ impl Editor {
         }
 
         Some(self.update_cursor_position())
+    }
+
+    fn move_cursor_to_prev_word(&mut self) -> Option<cursor::Goto> {
+        if self.cursor.x == 0 {
+            self.move_cursor_left()
+        } else {
+            let x = self.lines[self.cursor.y][..self.cursor.x-1]
+                .rfind(char::is_whitespace)
+                .map_or(0, |value| value + 1);
+
+            self.cursor.x      = x;
+            self.cursor.last_x = x;
+
+            Some(self.update_cursor_position())
+        }
+    }
+
+    fn move_cursor_to_next_word(&mut self) -> Option<cursor::Goto> {
+        let current_line_len = self.lines[self.cursor.y].len();
+
+        if self.cursor.x == current_line_len {
+            self.move_cursor_right()
+        } else {
+            let x = self.lines[self.cursor.y][self.cursor.x+1..]
+                .find(char::is_whitespace)
+                .map_or(current_line_len, |value| value + self.cursor.x + 1);
+
+            self.cursor.x      = x;
+            self.cursor.last_x = x;
+
+            Some(self.update_cursor_position())
+        }
     }
 
     fn move_cursor_to_new_line(&mut self) -> cursor::Goto {
