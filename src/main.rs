@@ -509,7 +509,11 @@ impl Editor {
         if self.cursor.x == 0 {
             self.move_cursor_left()
         } else {
-            let x = self.lines[self.cursor.y][..self.cursor.x-1]
+            let prev_word_end = self.lines[self.cursor.y][..self.cursor.x]
+                .rfind(|c: char| !c.is_whitespace())
+                .map_or(self.cursor.x, |value| self.cursor.x - value);
+
+            let x = self.lines[self.cursor.y][..self.cursor.x - prev_word_end]
                 .rfind(char::is_whitespace)
                 .map_or(0, |value| value + 1);
 
@@ -526,9 +530,13 @@ impl Editor {
         if self.cursor.x == current_line_len {
             self.move_cursor_right()
         } else {
-            let x = self.lines[self.cursor.y][self.cursor.x+1..]
+            let next_word_start = self.lines[self.cursor.y][self.cursor.x + 1..]
+                .find(|c: char| !c.is_whitespace())
+                .map_or(current_line_len - self.cursor.x, |value| value + 1);
+
+            let x = self.lines[self.cursor.y][self.cursor.x + next_word_start..]
                 .find(char::is_whitespace)
-                .map_or(current_line_len, |value| value + self.cursor.x + 1);
+                .map_or(current_line_len, |value| value + self.cursor.x + next_word_start);
 
             self.cursor.x      = x;
             self.cursor.last_x = x;
