@@ -91,7 +91,7 @@ impl Editor {
         }
     }
 
-    fn handle_key_event(&mut self, key: Key) -> bool { 
+    fn handle_key_event(&mut self, key: Key) -> bool {
         match key {
             Key::Up | Key::Down | Key::Left | Key::Right
                 => self.handle_arrow_key(key),
@@ -331,33 +331,53 @@ impl Editor {
 // char helpers
 impl Editor {
     fn insert_char(&mut self, c: char) {
-        if c == '\n' {
-            let trail = self.lines[self.cursor.y].split_off(self.cursor.x);
-            self.lines.insert(self.cursor.y + 1, trail);
-        } else {
-            self.lines[self.cursor.y].insert(self.cursor.x, c);
-            self.cursor.x      += 1;
-            self.cursor.last_x  = self.cursor.x;
+        match c {
+            '\n' => {
+                let trail = self.lines[self.cursor.y].split_off(self.cursor.x);
+                self.lines.insert(self.cursor.y + 1, trail);
+            },
+            '\t' => {
+                let spaces = " ".repeat(self.next_tab());
+
+                self.lines[self.cursor.y]
+                    .insert_str(
+                        self.cursor.x,
+                        &spaces
+                    );
+            },
+            _ => {
+                self.lines[self.cursor.y].insert(self.cursor.x, c);
+                self.cursor.x      += 1;
+                self.cursor.last_x  = self.cursor.x;
+            }
         }
     }
 
     fn print_char(&mut self, c: char) -> String {
-        if c == '\n' {
-            // TODO: make scrolling region end equal term height, not 200
-            format!(
-                "{}{}\x1b[{};200r{}\x1b[r",
-                clear::UntilNewline,
-                self.move_cursor_to_new_line(),
-                self.cursor.y + 1,
-                scroll::Down(1)
-            )
-        } else {
-            format!(
-                "{c}{}{}",
-                // TODO: non-ascii = panic, most probably everywhere else also
-                &self.lines[self.cursor.y][self.cursor.x..],
-                self.update_cursor_position()
-            )
+        match c {
+            '\n' => {
+                // TODO: make scrolling region end equal term height, not 200
+                format!(
+                    "{}{}\x1b[{};200r{}\x1b[r",
+                    clear::UntilNewline,
+                    self.move_cursor_to_new_line(),
+                    self.cursor.y + 1,
+                    scroll::Down(1)
+                )
+            },
+            '\t' => {
+                self.cursor.x += self.next_tab();
+
+                self.update_cursor_position().into()
+            },
+            _ => {
+                format!(
+                    "{c}{}{}",
+                    // TODO: non-ascii = panic, most probably everywhere else also
+                    &self.lines[self.cursor.y][self.cursor.x..],
+                    self.update_cursor_position()
+                )
+            }
         }
     }
 }
@@ -551,6 +571,12 @@ impl Editor {
         self.cursor.last_x  = 0;
 
         self.update_cursor_position()
+    }
+
+    const fn next_tab(&mut self) -> usize {
+        let n = 4 - (self.cursor.x % 4);
+
+        if n == 0 { 4 } else { n }
     }
 }
 
