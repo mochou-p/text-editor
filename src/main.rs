@@ -158,10 +158,10 @@ impl Editor {
         }
     }
 
-    fn handle_char_key(&mut self, c: char) {
-        self.insert_char(c);
+    fn handle_char_key(&mut self, ch: char) {
+        self.insert_char(ch);
 
-        let printable = self.print_char(c);
+        let printable = self.print_char(ch);
         write!(self.stdout, "{printable}").unwrap();
 
         self.try_refresh_colors();
@@ -189,13 +189,13 @@ impl Editor {
         self.cursor.x      -= 1;
         self.cursor.last_x  = self.cursor.x;
 
-        self.lines[self.cursor.y].remove(self.cursor.x);
+        self.lines[self.cursor.y].utf8_remove(self.cursor.x);
 
         write!(
             self.stdout,
             "{}{} {}",
             cursor::Left(1),
-            &self.lines[self.cursor.y][self.cursor.x..],
+            &self.lines[self.cursor.y].utf8_range(self.cursor.x, self.lines[self.cursor.y].utf8_len()),
             self.update_cursor_position()
         ).unwrap();
     }
@@ -204,7 +204,7 @@ impl Editor {
         let moved_line = self.lines.remove(self.cursor.y);
 
         self.cursor.y      -= 1;
-        self.cursor.x       = self.lines[self.cursor.y].len();
+        self.cursor.x       = self.lines[self.cursor.y].utf8_len();
         self.cursor.last_x  = self.cursor.x;
 
         self.lines[self.cursor.y]
@@ -237,6 +237,7 @@ impl Word {
 
 // coloring helpers
 impl Editor {
+    // TODO: make it context-aware and more sophisticated
     fn try_refresh_colors(&mut self) {
         let words = self.parse_current_line_into_words();
 
@@ -267,7 +268,9 @@ impl Editor {
             self.stdout,
             "{}{color}{text}",
             cursor::Goto(
-                u16::try_from(word.start    + 1).unwrap(),
+                u16::try_from(
+                    line[..word.start].utf8_len() + 1
+                ).unwrap(),
                 u16::try_from(self.cursor.y + 1).unwrap()
             )
         ).unwrap();
@@ -281,7 +284,7 @@ impl Editor {
             | "isize" | "move" | "mut" | "ref" | "Self" | "static" | "str" | "String" | "u8"
             | "u16" | "u32" | "u64" | "u128" | "usize"
                 => Some(&color::Yellow),
-            "as" | "Err" | "false" | "None" | "Result" | "self" | "Some" | "true"
+            "as" | "Err" | "false" | "None" | "Ok" | "Result" | "self" | "Some" | "true"
                 => Some(&color::Cyan),
             "break" | "continue" | "crate" | "else" | "enum" | "extern" | "fn" | "for" | "if"
             | "impl" | "in" | "let" | "loop" | "match" | "mod" | "pub" | "return" | "struct"
@@ -292,7 +295,6 @@ impl Editor {
         }
     }
 
-    // TODO: only reparse the current word
     fn parse_current_line_into_words(&self) -> Vec<Word> {
         let mut words      = Vec::with_capacity(128);
         let     line       = &self.lines[self.cursor.y];
@@ -301,13 +303,13 @@ impl Editor {
         loop {
             let slice = &line[line_start..];
 
-            let Some(start) = slice.find(|c: char| !c.is_whitespace()) else {
-                // TODO: but why do i only get here once when spamming [Enter]?
+            let Some(start) = slice.find(|ch: char| !ch.is_whitespace()) else {
+                // NOTE: but why do i only get here once when spamming [Enter]?
                 break;
             };
 
             let from_word_start = &slice[start..];
-            let word_len_option = from_word_start.find(|c: char| c.is_whitespace());
+            let word_len_option = from_word_start.find(char::is_whitespace);
 
             if let Some(len) = word_len_option {
                 let end  = start + len;
@@ -330,14 +332,14 @@ impl Editor {
 
 // char helpers
 impl Editor {
-    fn insert_char(&mut self, c: char) {
-        match c {
+    fn insert_char(&mut self, ch: char) {
+        match ch {
             '\n' => {
-                let trail = self.lines[self.cursor.y].split_off(self.cursor.x);
+                let trail = self.lines[self.cursor.y].utf8_split_off(self.cursor.x);
                 self.lines.insert(self.cursor.y + 1, trail);
             },
             '\t' => {
-                let spaces = " ".repeat(self.next_tab());
+                let spaces = " ".repeat(self.chars_left_until_next_tab());
 
                 self.lines[self.cursor.y]
                     .insert_str(
@@ -346,15 +348,15 @@ impl Editor {
                     );
             },
             _ => {
-                self.lines[self.cursor.y].insert(self.cursor.x, c);
+                self.lines[self.cursor.y].utf8_insert(self.cursor.x, ch);
                 self.cursor.x      += 1;
                 self.cursor.last_x  = self.cursor.x;
             }
         }
     }
 
-    fn print_char(&mut self, c: char) -> String {
-        match c {
+    fn print_char(&mut self, ch: char) -> String {
+        match ch {
             '\n' => {
                 // TODO: make scrolling region end equal term height, not 200
                 format!(
@@ -366,15 +368,14 @@ impl Editor {
                 )
             },
             '\t' => {
-                self.cursor.x += self.next_tab();
+                self.cursor.x += self.chars_left_until_next_tab();
 
                 self.update_cursor_position().into()
             },
             _ => {
                 format!(
-                    "{c}{}{}",
-                    // TODO: non-ascii = panic, most probably everywhere else also
-                    &self.lines[self.cursor.y][self.cursor.x..],
+                    "{ch}{}{}",
+                    &self.lines[self.cursor.y].utf8_range(self.cursor.x, self.lines[self.cursor.y].utf8_len()),
                     self.update_cursor_position()
                 )
             }
@@ -404,7 +405,7 @@ impl Editor {
     }
 
     fn move_cursor_to_horizontal_end(&mut self) -> Option<cursor::Goto> {
-        self.cursor.last_x = self.lines[self.cursor.y].len();
+        self.cursor.last_x = self.lines[self.cursor.y].utf8_len();
 
         if self.cursor.x == self.cursor.last_x {
             return None;
@@ -424,7 +425,7 @@ impl Editor {
 
         self.cursor.x
             .to_max_with(self.cursor.last_x)
-            .to_min_with(self.lines[self.cursor.y].len());
+            .to_min_with(self.lines[self.cursor.y].utf8_len());
 
         Some(self.update_cursor_position())
     }
@@ -440,7 +441,7 @@ impl Editor {
 
         self.cursor.x
             .to_max_with(self.cursor.last_x)
-            .to_min_with(self.lines[self.cursor.y].len());
+            .to_min_with(self.lines[self.cursor.y].utf8_len());
 
         Some(self.update_cursor_position())
     }
@@ -459,14 +460,14 @@ impl Editor {
 
             self.cursor.x
                 .to_max_with(self.cursor.last_x)
-                .to_min_with(self.lines[self.cursor.y].len());
+                .to_min_with(self.lines[self.cursor.y].utf8_len());
         }
 
         Some(self.update_cursor_position())
     }
 
     fn move_cursor_down(&mut self) -> Option<cursor::Goto> {
-        let current_line_len = self.lines[self.cursor.y].len();
+        let current_line_len = self.lines[self.cursor.y].utf8_len();
 
         if self.cursor.y == self.lines.len() - 1 {
             if self.cursor.x == current_line_len {
@@ -474,14 +475,14 @@ impl Editor {
                 return None;
             }
 
-            self.cursor.x      = self.lines[self.cursor.y].len();
+            self.cursor.x      = self.lines[self.cursor.y].utf8_len();
             self.cursor.last_x = self.cursor.x;
         } else {
             self.cursor.y += 1;
 
             self.cursor.x
                 .to_max_with(self.cursor.last_x)
-                .to_min_with(self.lines[self.cursor.y].len());
+                .to_min_with(self.lines[self.cursor.y].utf8_len());
         }
 
         Some(self.update_cursor_position())
@@ -495,7 +496,7 @@ impl Editor {
             }
 
             self.cursor.y -= 1;
-            self.cursor.x  = self.lines[self.cursor.y].len();
+            self.cursor.x  = self.lines[self.cursor.y].utf8_len();
         } else {
             self.cursor.x -= 1;
         }
@@ -506,7 +507,7 @@ impl Editor {
     }
 
     fn move_cursor_right(&mut self) -> Option<cursor::Goto> {
-        let current_line_len = self.lines[self.cursor.y].len();
+        let current_line_len = self.lines[self.cursor.y].utf8_len();
 
         if self.cursor.x == current_line_len {
             if self.cursor.y == self.lines.len() - 1 {
@@ -527,42 +528,89 @@ impl Editor {
 
     fn move_cursor_to_prev_word(&mut self) -> Option<cursor::Goto> {
         if self.cursor.x == 0 {
-            self.move_cursor_left()
-        } else {
-            let prev_word_end = self.lines[self.cursor.y][..self.cursor.x]
-                .rfind(|c: char| !c.is_whitespace())
-                .map_or(self.cursor.x, |value| self.cursor.x - value);
-
-            let x = self.lines[self.cursor.y][..self.cursor.x - prev_word_end]
-                .rfind(char::is_whitespace)
-                .map_or(0, |value| value + 1);
-
-            self.cursor.x      = x;
-            self.cursor.last_x = x;
-
-            Some(self.update_cursor_position())
+            return self.move_cursor_left();
         }
+
+        // TODO: clean up
+        let rofl = {
+            let closest_word_to_left_absolute_end_option = self.lines[self.cursor.y]
+                .utf8_range(0, self.cursor.x)
+                .rfind(|ch: char| !ch.is_whitespace());
+
+            if let Some(closest_word_to_left_absolute_end) = closest_word_to_left_absolute_end_option {
+                let idk = String::from(
+                    &self.lines[self.cursor.y]
+                        [..closest_word_to_left_absolute_end]
+                ).utf8_len();
+
+                let lol = self.lines[self.cursor.y]
+                    .utf8_range(0, idk);
+
+                if let Some(lmao) = lol.rfind(char::is_whitespace) {
+                    String::from(
+                        &self.lines[self.cursor.y]
+                            [..lmao]
+                    ).utf8_len() + 1
+                } else {
+                    0
+                }
+            } else {
+                0
+            }
+        };
+
+        self.cursor.x      = rofl;
+        self.cursor.last_x = rofl;
+
+        Some(self.update_cursor_position())
     }
 
     fn move_cursor_to_next_word(&mut self) -> Option<cursor::Goto> {
-        let current_line_len = self.lines[self.cursor.y].len();
+        let current_line_len = self.lines[self.cursor.y].utf8_len();
 
         if self.cursor.x == current_line_len {
-            self.move_cursor_right()
-        } else {
-            let next_word_start = self.lines[self.cursor.y][self.cursor.x + 1..]
-                .find(|c: char| !c.is_whitespace())
-                .map_or(current_line_len - self.cursor.x, |value| value + 1);
-
-            let x = self.lines[self.cursor.y][self.cursor.x + next_word_start..]
-                .find(char::is_whitespace)
-                .map_or(current_line_len, |value| value + self.cursor.x + next_word_start);
-
-            self.cursor.x      = x;
-            self.cursor.last_x = x;
-
-            Some(self.update_cursor_position())
+            return self.move_cursor_right();
         }
+
+        // TODO: clean up
+        let utf8_distance_to_whitespace = {
+            let closest_word_to_right_relative_start_option = self.lines[self.cursor.y]
+                .utf8_range(
+                    self.cursor.x,
+                    self.lines[self.cursor.y].utf8_len()
+                )
+                .find(|ch: char| !ch.is_whitespace());
+
+            if let Some(closest_word_to_right_relative_start) = closest_word_to_right_relative_start_option {
+                let distance_to_whitespace_option = self.lines[self.cursor.y]
+                    .utf8_range(
+                        self.cursor.x + closest_word_to_right_relative_start,
+                        self.lines[self.cursor.y].utf8_len()
+                    )
+                    .find(char::is_whitespace);
+
+                if let Some(distance_to_whitespace) = distance_to_whitespace_option {
+                    let utf8_search_start = self.lines[self.cursor.y]
+                        .utf8_index(self.cursor.x + closest_word_to_right_relative_start);
+
+                    let string_until_whitespace = &self.lines[self.cursor.y]
+                        [utf8_search_start..utf8_search_start + distance_to_whitespace];
+
+                    let utf8_distance_to_whitespace = string_until_whitespace.utf8_len();
+
+                    utf8_distance_to_whitespace + closest_word_to_right_relative_start
+                } else {
+                    current_line_len - self.cursor.x
+                }
+            } else {
+                current_line_len - self.cursor.x
+            }
+        };
+
+        self.cursor.x      += utf8_distance_to_whitespace;
+        self.cursor.last_x  = self.cursor.x;
+
+        Some(self.update_cursor_position())
     }
 
     fn move_cursor_to_new_line(&mut self) -> cursor::Goto {
@@ -573,7 +621,7 @@ impl Editor {
         self.update_cursor_position()
     }
 
-    const fn next_tab(&mut self) -> usize {
+    const fn chars_left_until_next_tab(&self) -> usize {
         let n = 4 - (self.cursor.x % 4);
 
         if n == 0 { 4 } else { n }
@@ -597,4 +645,87 @@ trait ToMaxWith: Ord + Copy {
 }
 
 impl ToMaxWith for usize {}
+
+trait Utf8Len {
+    fn utf8_len(&self) -> usize;
+}
+
+impl Utf8Len for str {
+    fn utf8_len(&self) -> usize {
+        self.chars().count()
+    }
+}
+
+impl Utf8Len for String {
+    fn utf8_len(&self) -> usize {
+        self.as_str().utf8_len()
+    }
+}
+
+trait Utf8Range {
+    fn utf8_range(&self, start: usize, end: usize) -> String;
+}
+
+impl Utf8Range for str {
+    fn utf8_range(&self, start: usize, end: usize) -> String {
+        self.chars()
+            .skip(start)
+            .take(end - start)
+            .collect()
+    }
+}
+
+impl Utf8Range for String {
+    fn utf8_range(&self, start: usize, end: usize) -> String {
+        self.as_str().utf8_range(start, end)
+    }
+}
+
+trait Utf8Index {
+    fn utf8_index(&self, idx: usize) -> usize;
+}
+
+impl Utf8Index for str {
+    fn utf8_index(&self, idx: usize) -> usize {
+        self.char_indices()
+            .nth(idx)
+            .map_or(self.len(), |(i, _)| i)
+    }
+}
+
+impl Utf8Index for String {
+    fn utf8_index(&self, idx: usize) -> usize {
+        self.as_str().utf8_index(idx)
+    }
+}
+
+trait Utf8Insert {
+    fn utf8_insert(&mut self, idx: usize, ch: char);
+}
+
+impl Utf8Insert for String {
+    fn utf8_insert(&mut self, idx: usize, ch: char) {
+        self.insert(self.utf8_index(idx), ch);
+    }
+}
+
+trait Utf8Remove {
+    fn utf8_remove(&mut self, idx: usize);
+}
+
+impl Utf8Remove for String {
+    fn utf8_remove(&mut self, idx: usize) {
+        self.remove(self.utf8_index(idx));
+    }
+}
+
+trait Utf8SplitOff {
+    fn utf8_split_off(&mut self, at: usize) -> String;
+}
+
+impl Utf8SplitOff for String {
+    fn utf8_split_off(&mut self, at: usize) -> String {
+        self.split_off(self.utf8_index(at))
+    }
+}
 
