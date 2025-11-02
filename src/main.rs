@@ -101,6 +101,7 @@ impl Editor {
                 => self.handle_edge_key(key),
             Key::Char(c)   => self.handle_char_key(c),
             Key::Backspace => self.handle_backspace(),
+            Key::Delete    => self.handle_delete(),
             Key::Esc       => { return true; },
             _              => ()
         }
@@ -181,6 +182,23 @@ impl Editor {
 
         self.try_refresh_colors();
     }
+
+    fn handle_delete(&mut self) {
+        let current_line_len = self.lines[self.cursor.y].utf8_len();
+
+        if self.cursor.x == current_line_len {
+            if self.cursor.y == self.lines.len() {
+                self.cursor.last_x = current_line_len;
+                return;
+            }
+
+            self.wrapping_delete();
+        } else {
+            self.normal_delete();
+        }
+
+        self.try_refresh_colors();
+    }
 }
 
 // backspace helpers
@@ -215,6 +233,40 @@ impl Editor {
             self.stdout,
             "\x1b[{};200r{}\x1b[r{}{moved_line}",
             self.cursor.y + 1,
+            scroll::Up(1),
+            self.update_cursor_position()
+        ).unwrap();
+    }
+}
+
+// delete helpers
+impl Editor {
+    fn normal_delete(&mut self) {
+        self.cursor.last_x = self.cursor.x;
+
+        self.lines[self.cursor.y].utf8_remove(self.cursor.x);
+
+        write!(
+            self.stdout,
+            "{} {}",
+            &self.lines[self.cursor.y].utf8_range(self.cursor.x, self.lines[self.cursor.y].utf8_len()),
+            self.update_cursor_position()
+        ).unwrap();
+    }
+
+    fn wrapping_delete(&mut self) {
+        let moved_line = self.lines.remove(self.cursor.y + 1);
+
+        self.cursor.last_x = self.cursor.x;
+
+        self.lines[self.cursor.y]
+            .push_str(&moved_line);
+
+        // TODO: make scrolling region end equal term height, not 200
+        write!(
+            self.stdout,
+            "{moved_line}\x1b[{};200r{}\x1b[r{}",
+            self.cursor.y + 2,
             scroll::Up(1),
             self.update_cursor_position()
         ).unwrap();
@@ -284,7 +336,7 @@ impl Editor {
             | "isize" | "move" | "mut" | "ref" | "Self" | "static" | "str" | "String" | "u8"
             | "u16" | "u32" | "u64" | "u128" | "usize"
                 => Some(&color::Yellow),
-            "as" | "Err" | "false" | "None" | "Ok" | "Result" | "self" | "Some" | "true"
+            "as" | "Err" | "false" | "None" | "Ok" | "Option" | "Result" | "self" | "Some" | "true"
                 => Some(&color::Cyan),
             "break" | "continue" | "crate" | "else" | "enum" | "extern" | "fn" | "for" | "if"
             | "impl" | "in" | "let" | "loop" | "match" | "mod" | "pub" | "return" | "struct"
