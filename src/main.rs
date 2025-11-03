@@ -81,14 +81,33 @@ impl Editor {
     }
 }
 
+mod unsupported {
+    pub const CTRL_DELETE: [u8; 6] = [27, 91, 51, 59, 53, 126];
+}
+
 // event handlers
 impl Editor {
     fn handle_event(&mut self, event: Event) -> bool {
-        match event {
+        // TODO: only this when its necessary
+        write!(self.stdout, "{}", cursor::Hide).unwrap();
+
+        let should_exit = match event {
             Event::Key(key)           => self.handle_key_event(key),
             Event::Mouse(mouse_event) => Self::handle_mouse_event(mouse_event),
-            Event::Unsupported(_)     => false
-        }
+            Event::Unsupported(bytes) => {
+                if bytes == unsupported::CTRL_DELETE {
+                    self.handle_delete(true);
+                }
+
+                false
+            }
+        };
+
+        // TODO: same here
+        write!(self.stdout, "{}", cursor::Show).unwrap();
+        self.stdout.flush().unwrap();
+
+        should_exit
     }
 
     fn handle_key_event(&mut self, key: Key) -> bool {
@@ -99,11 +118,12 @@ impl Editor {
                 => self.handle_word_key(key),
             Key::Home | Key::End | Key::CtrlHome | Key::CtrlEnd
                 => self.handle_edge_key(key),
-            Key::Char(c)   => self.handle_char_key(c),
-            Key::Backspace => self.handle_backspace(),
-            Key::Delete    => self.handle_delete(),
-            Key::Esc       => { return true; },
-            _              => ()
+            Key::Char(c)       => self.handle_char_key(c),
+            Key::Backspace     => self.handle_backspace(false),
+            Key::Ctrl('h')     => self.handle_backspace(true),
+            Key::Delete        => self.handle_delete(false),
+            Key::Esc           => { return true; },
+            _                  => ()
         }
 
         false
@@ -164,11 +184,12 @@ impl Editor {
 
         let printable = self.print_char(ch);
         write!(self.stdout, "{printable}").unwrap();
+        self.stdout.flush().unwrap();
 
         self.try_refresh_colors();
     }
 
-    fn handle_backspace(&mut self) {
+    fn handle_backspace(&mut self, ctrl: bool) {
         if self.cursor.x == 0 {
             if self.cursor.y == 0 {
                 self.cursor.last_x = 0;
@@ -176,26 +197,34 @@ impl Editor {
             }
 
             self.wrapping_backspace();
+        } else if ctrl {
+                self.ctrl_backspace();
         } else {
             self.normal_backspace();
         }
 
+        self.stdout.flush().unwrap();
+
         self.try_refresh_colors();
     }
 
-    fn handle_delete(&mut self) {
+    fn handle_delete(&mut self, ctrl: bool) {
         let current_line_len = self.lines[self.cursor.y].utf8_len();
 
         if self.cursor.x == current_line_len {
-            if self.cursor.y == self.lines.len() {
+            if self.cursor.y == self.lines.len() - 1 {
                 self.cursor.last_x = current_line_len;
                 return;
             }
 
             self.wrapping_delete();
+        } else if ctrl {
+            self.ctrl_delete();
         } else {
             self.normal_delete();
         }
+
+        self.stdout.flush().unwrap();
 
         self.try_refresh_colors();
     }
@@ -214,6 +243,25 @@ impl Editor {
             "{}{} {}",
             cursor::Left(1),
             &self.lines[self.cursor.y].utf8_range(self.cursor.x, self.lines[self.cursor.y].utf8_len()),
+            self.update_cursor_position()
+        ).unwrap();
+    }
+
+    fn ctrl_backspace(&mut self) {
+        let start = self.utf8_position_of_left_whitespace();
+
+        self.lines[self.cursor.y]
+            .utf8_drain(start, self.cursor.x);
+
+        self.cursor.x      = start;
+        self.cursor.last_x = start;
+
+        write!(
+            self.stdout,
+            "{}{}{}{}",
+            self.update_cursor_position(),
+            self.lines[self.cursor.y].utf8_range(self.cursor.x, self.lines[self.cursor.y].utf8_len()),
+            clear::UntilNewline,
             self.update_cursor_position()
         ).unwrap();
     }
@@ -252,6 +300,25 @@ impl Editor {
             &self.lines[self.cursor.y].utf8_range(self.cursor.x, self.lines[self.cursor.y].utf8_len()),
             self.update_cursor_position()
         ).unwrap();
+    }
+
+    fn ctrl_delete(&mut self) {
+        let offset = self.utf8_offset_to_right_whitespace();
+
+        self.lines[self.cursor.y]
+            .utf8_drain(self.cursor.x, self.cursor.x + offset);
+
+        self.cursor.last_x = self.cursor.x;
+
+        write!(
+            self.stdout,
+            "{}{}{}",
+            self.lines[self.cursor.y].utf8_range(self.cursor.x, self.lines[self.cursor.y].utf8_len()),
+            clear::UntilNewline,
+            self.update_cursor_position()
+        ).unwrap();
+
+        self.stdout.flush().unwrap();
     }
 
     fn wrapping_delete(&mut self) {
@@ -326,6 +393,8 @@ impl Editor {
                 u16::try_from(self.cursor.y + 1).unwrap()
             )
         ).unwrap();
+
+        self.stdout.flush().unwrap();
     }
 
     fn get_text_color(text: &str) -> Option<&dyn Color> {
@@ -583,83 +652,18 @@ impl Editor {
             return self.move_cursor_left();
         }
 
-        // TODO: clean up
-        let rofl = {
-            let closest_word_to_left_absolute_end_option = self.lines[self.cursor.y]
-                .utf8_range(0, self.cursor.x)
-                .rfind(|ch: char| !ch.is_whitespace());
-
-            if let Some(closest_word_to_left_absolute_end) = closest_word_to_left_absolute_end_option {
-                let idk = String::from(
-                    &self.lines[self.cursor.y]
-                        [..closest_word_to_left_absolute_end]
-                ).utf8_len();
-
-                let lol = self.lines[self.cursor.y]
-                    .utf8_range(0, idk);
-
-                if let Some(lmao) = lol.rfind(char::is_whitespace) {
-                    String::from(
-                        &self.lines[self.cursor.y]
-                            [..lmao]
-                    ).utf8_len() + 1
-                } else {
-                    0
-                }
-            } else {
-                0
-            }
-        };
-
-        self.cursor.x      = rofl;
-        self.cursor.last_x = rofl;
+        self.cursor.x      = self.utf8_position_of_left_whitespace();
+        self.cursor.last_x = self.cursor.x;
 
         Some(self.update_cursor_position())
     }
 
     fn move_cursor_to_next_word(&mut self) -> Option<cursor::Goto> {
-        let current_line_len = self.lines[self.cursor.y].utf8_len();
-
-        if self.cursor.x == current_line_len {
+        if self.cursor.x == self.lines[self.cursor.y].utf8_len() {
             return self.move_cursor_right();
         }
 
-        // TODO: clean up
-        let utf8_distance_to_whitespace = {
-            let closest_word_to_right_relative_start_option = self.lines[self.cursor.y]
-                .utf8_range(
-                    self.cursor.x,
-                    self.lines[self.cursor.y].utf8_len()
-                )
-                .find(|ch: char| !ch.is_whitespace());
-
-            if let Some(closest_word_to_right_relative_start) = closest_word_to_right_relative_start_option {
-                let distance_to_whitespace_option = self.lines[self.cursor.y]
-                    .utf8_range(
-                        self.cursor.x + closest_word_to_right_relative_start,
-                        self.lines[self.cursor.y].utf8_len()
-                    )
-                    .find(char::is_whitespace);
-
-                if let Some(distance_to_whitespace) = distance_to_whitespace_option {
-                    let utf8_search_start = self.lines[self.cursor.y]
-                        .utf8_index(self.cursor.x + closest_word_to_right_relative_start);
-
-                    let string_until_whitespace = &self.lines[self.cursor.y]
-                        [utf8_search_start..utf8_search_start + distance_to_whitespace];
-
-                    let utf8_distance_to_whitespace = string_until_whitespace.utf8_len();
-
-                    utf8_distance_to_whitespace + closest_word_to_right_relative_start
-                } else {
-                    current_line_len - self.cursor.x
-                }
-            } else {
-                current_line_len - self.cursor.x
-            }
-        };
-
-        self.cursor.x      += utf8_distance_to_whitespace;
+        self.cursor.x      += self.utf8_offset_to_right_whitespace();
         self.cursor.last_x  = self.cursor.x;
 
         Some(self.update_cursor_position())
@@ -677,6 +681,73 @@ impl Editor {
         let n = 4 - (self.cursor.x % 4);
 
         if n == 0 { 4 } else { n }
+    }
+}
+
+// utf-8 helpers (sorry if you have to read these lol)
+impl Editor {
+    fn utf8_position_of_left_whitespace(&self) -> usize {
+        self.lines[self.cursor.y]
+            .utf8_range(0, self.cursor.x)
+            .rfind(|ch: char| !ch.is_whitespace())
+            .map_or_else(
+                || 0,
+                |closest_word_to_left_absolute_end| {
+                    self.lines[self.cursor.y]
+                        .utf8_range(
+                            0,
+                            self.lines[self.cursor.y]
+                                [..closest_word_to_left_absolute_end]
+                                .utf8_len()
+                        )
+                        .rfind(char::is_whitespace)
+                        .map_or_else(
+                            || 0,
+                            |whitespace_index| {
+                                self.lines[self.cursor.y]
+                                    [..whitespace_index]
+                                    .utf8_len()
+                                    + 1
+                            }
+                        )
+                }
+            )
+    }
+
+    fn utf8_offset_to_right_whitespace(&self) -> usize {
+        let current_line_len = self.lines[self.cursor.y].utf8_len();
+
+        self.lines[self.cursor.y]
+            .utf8_range(
+                self.cursor.x,
+                self.lines[self.cursor.y].utf8_len()
+            )
+            .find(|ch: char| !ch.is_whitespace())
+            .map_or_else(
+                || current_line_len - self.cursor.x,
+                |closest_word_to_right_relative_start| {
+                    self.lines[self.cursor.y]
+                        .utf8_range(
+                            self.cursor.x + closest_word_to_right_relative_start,
+                            self.lines[self.cursor.y].utf8_len()
+                        )
+                        .find(char::is_whitespace)
+                        .map_or_else(
+                            || current_line_len - self.cursor.x,
+                            |distance_to_whitespace| {
+                                let utf8_search_start = self.lines[self.cursor.y]
+                                    .utf8_index(self.cursor.x + closest_word_to_right_relative_start);
+
+                                let string_until_whitespace = &self.lines[self.cursor.y]
+                                    [utf8_search_start..utf8_search_start + distance_to_whitespace];
+
+                                let utf8_distance_to_whitespace = string_until_whitespace.utf8_len();
+
+                                utf8_distance_to_whitespace + closest_word_to_right_relative_start
+                            }
+                        )
+                }
+            )
     }
 }
 
@@ -741,7 +812,7 @@ impl Utf8Index for str {
     fn utf8_index(&self, idx: usize) -> usize {
         self.char_indices()
             .nth(idx)
-            .map_or(self.len(), |(i, _)| i)
+            .map_or_else(|| self.len(), |(i, _)| i)
     }
 }
 
@@ -778,6 +849,20 @@ trait Utf8SplitOff {
 impl Utf8SplitOff for String {
     fn utf8_split_off(&mut self, at: usize) -> String {
         self.split_off(self.utf8_index(at))
+    }
+}
+
+trait Utf8Drain {
+    fn utf8_drain(&mut self, start: usize, end: usize);
+}
+
+impl Utf8Drain for String {
+    fn utf8_drain(&mut self, start: usize, end: usize) {
+        self.drain(
+            self.utf8_index(start)
+            ..
+            self.utf8_index(end)
+        );
     }
 }
 
