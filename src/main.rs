@@ -2,35 +2,18 @@
 
 use std::io::{self, Stdout, Write as _};
 
-use termion::{clear, cursor, scroll};
-use termion::color::{self, Color};
+use betterm::{clear, color, cursor, screen, scroll, RESET_ALL};
+
 use termion::event::{Event, Key, MouseEvent};
 use termion::input::{MouseTerminal, TermRead as _};
-use termion::screen::{AlternateScreen, IntoAlternateScreen as _};
 use termion::raw::{RawTerminal, IntoRawMode as _};
 
 
 fn main() {
-    let lines = {
-        let mut editor = Editor::new();
-        editor.initialise();
-        editor.run();
-        editor.lines
-    };
-
-    for (i, line) in lines.into_iter().enumerate() {
-        println!(
-            "{:>4}: {}^{}{line}{}${}",
-            i + 1,
-            color::Fg(color::Black),
-            color::Fg(color::Reset),
-            color::Fg(color::Black),
-            color::Fg(color::Reset)
-        );
-    }
+    Editor::new().run();
 }
 
-type SpecialStdout = MouseTerminal<AlternateScreen<RawTerminal<Stdout>>>;
+type SpecialStdout = MouseTerminal<RawTerminal<Stdout>>;
 
 #[derive(Default)]
 struct Cursor {
@@ -52,8 +35,6 @@ impl Editor {
             io::stdout()
                 .into_raw_mode()
                 .unwrap()
-                .into_alternate_screen()
-                .unwrap()
         );
         let cursor = Cursor::default();
 
@@ -64,11 +45,20 @@ impl Editor {
     }
 
     fn initialise(&mut self) {
-        write!(self.stdout, "{}{}", clear::All, self.update_cursor_position()).unwrap();
+        write!(
+            self.stdout,
+            "{}{}{}",
+            screen::ENTER_ALTERNATE,
+            clear::WHOLE_SCREEN,
+            self.update_cursor_position()
+        ).unwrap();
+
         self.stdout.flush().unwrap();
     }
 
-    fn run(&mut self) {
+    fn run(mut self) {
+        self.initialise();
+
         let stdin = io::stdin();
 
         for event in stdin.events() {
@@ -81,6 +71,26 @@ impl Editor {
     }
 }
 
+impl Drop for Editor {
+    fn drop(&mut self) {
+        write!(self.stdout, "{}", screen::LEAVE_ALTERNATE).unwrap();
+        self.stdout.flush().unwrap();
+
+        for (i, line) in self.lines.iter().enumerate() {
+            print!(
+                "{:>4}: {}^{}{line}{}${}{}",
+                i + 1,
+                color::FG_BLACK,
+                color::UNSET_FG,
+                color::FG_BLACK,
+                color::UNSET_FG,
+                cursor::MOVE_TO_START_OF_NEXT_LINE
+            );
+        }
+        self.stdout.flush().unwrap();
+    }
+}
+
 mod unsupported {
     pub const CTRL_DELETE: [u8; 6] = [27, 91, 51, 59, 53, 126];
 }
@@ -89,7 +99,7 @@ mod unsupported {
 impl Editor {
     fn handle_event(&mut self, event: Event) -> bool {
         // TODO: only this when its necessary
-        write!(self.stdout, "{}", cursor::Hide).unwrap();
+        write!(self.stdout, "{}", cursor::HIDE).unwrap();
 
         let should_exit = match event {
             Event::Key(key)           => self.handle_key_event(key),
@@ -104,7 +114,7 @@ impl Editor {
         };
 
         // TODO: same here
-        write!(self.stdout, "{}", cursor::Show).unwrap();
+        write!(self.stdout, "{}", cursor::SHOW).unwrap();
         self.stdout.flush().unwrap();
 
         should_exit
@@ -118,12 +128,12 @@ impl Editor {
                 => self.handle_word_key(key),
             Key::Home | Key::End | Key::CtrlHome | Key::CtrlEnd
                 => self.handle_edge_key(key),
-            Key::Char(c)       => self.handle_char_key(c),
-            Key::Backspace     => self.handle_backspace(false),
-            Key::Ctrl('h')     => self.handle_backspace(true),
-            Key::Delete        => self.handle_delete(false),
-            Key::Esc           => { return true; },
-            _                  => ()
+            Key::Char(c)   => self.handle_char_key(c),
+            Key::Backspace => self.handle_backspace(false),
+            Key::Ctrl('h') => self.handle_backspace(true),
+            Key::Delete    => self.handle_delete(false),
+            Key::Esc       => { return true; },
+            _              => ()
         }
 
         false
@@ -186,7 +196,7 @@ impl Editor {
         write!(self.stdout, "{printable}").unwrap();
         self.stdout.flush().unwrap();
 
-        self.try_refresh_colors();
+        self.refresh();
     }
 
     fn handle_backspace(&mut self, ctrl: bool) {
@@ -198,14 +208,14 @@ impl Editor {
 
             self.wrapping_backspace();
         } else if ctrl {
-                self.ctrl_backspace();
+            self.ctrl_backspace();
         } else {
             self.normal_backspace();
         }
 
         self.stdout.flush().unwrap();
 
-        self.try_refresh_colors();
+        self.refresh();
     }
 
     fn handle_delete(&mut self, ctrl: bool) {
@@ -226,7 +236,7 @@ impl Editor {
 
         self.stdout.flush().unwrap();
 
-        self.try_refresh_colors();
+        self.refresh();
     }
 }
 
@@ -241,7 +251,7 @@ impl Editor {
         write!(
             self.stdout,
             "{}{} {}",
-            cursor::Left(1),
+            cursor::MOVE_LEFT,
             &self.lines[self.cursor.y].utf8_range(self.cursor.x, self.lines[self.cursor.y].utf8_len()),
             self.update_cursor_position()
         ).unwrap();
@@ -261,7 +271,7 @@ impl Editor {
             "{}{}{}{}",
             self.update_cursor_position(),
             self.lines[self.cursor.y].utf8_range(self.cursor.x, self.lines[self.cursor.y].utf8_len()),
-            clear::UntilNewline,
+            clear::LINE_RIGHT_OF_CURSOR,
             self.update_cursor_position()
         ).unwrap();
     }
@@ -281,7 +291,7 @@ impl Editor {
             self.stdout,
             "\x1b[{};200r{}\x1b[r{}{moved_line}",
             self.cursor.y + 1,
-            scroll::Up(1),
+            scroll::UpBy(1),
             self.update_cursor_position()
         ).unwrap();
     }
@@ -314,7 +324,7 @@ impl Editor {
             self.stdout,
             "{}{}{}",
             self.lines[self.cursor.y].utf8_range(self.cursor.x, self.lines[self.cursor.y].utf8_len()),
-            clear::UntilNewline,
+            clear::LINE_RIGHT_OF_CURSOR,
             self.update_cursor_position()
         ).unwrap();
 
@@ -334,7 +344,7 @@ impl Editor {
             self.stdout,
             "{moved_line}\x1b[{};200r{}\x1b[r{}",
             self.cursor.y + 2,
-            scroll::Up(1),
+            scroll::UpBy(1),
             self.update_cursor_position()
         ).unwrap();
     }
@@ -354,12 +364,17 @@ impl Word {
     }
 }
 
-// coloring helpers
+// styling helpers
 impl Editor {
-    // TODO: make it context-aware and more sophisticated
-    fn try_refresh_colors(&mut self) {
+    fn refresh(&mut self) {
         let words = self.parse_current_line_into_words();
 
+        // self.refresh_indent_indicator(&words);
+        self.refresh_colors(words);
+    }
+
+    // TODO: make it context-aware and more sophisticated
+    fn refresh_colors(&mut self, words: Vec<Word>) {
         for word in words {
             self.try_colorise_word(word);
         }
@@ -368,7 +383,7 @@ impl Editor {
             self.stdout,
             "{}{}",
             self.update_cursor_position(),
-            color::Fg(color::Reset)
+            RESET_ALL
         ).unwrap();
 
         self.stdout.flush().unwrap();
@@ -378,15 +393,13 @@ impl Editor {
         let line = &self.lines[self.cursor.y];
         let text = &line[word.start..word.end];
 
-        let color = color::Fg(
-            Self::get_text_color(text)
-                .unwrap_or(&color::Reset)
-        );
+        let color = Self::get_text_color(text)
+            .unwrap_or_else(|| RESET_ALL.to_string());
 
         write!(
             self.stdout,
             "{}{color}{text}",
-            cursor::Goto(
+            cursor::MoveToColumnAndRow(
                 u16::try_from(
                     line[..word.start].utf8_len() + 1
                 ).unwrap(),
@@ -397,20 +410,20 @@ impl Editor {
         self.stdout.flush().unwrap();
     }
 
-    fn get_text_color(text: &str) -> Option<&dyn Color> {
+    fn get_text_color(text: &str) -> Option<String> {
         match text {
             "macro_rules!" | "unsafe"
-                => Some(&color::Red),
+                => Some(color::FG_RED.to_string()),
             "bool" | "char" | "const" | "f32" | "f64" | "i8" | "i16" | "i32" | "i64" | "i128"
             | "isize" | "move" | "mut" | "ref" | "Self" | "static" | "str" | "String" | "u8"
             | "u16" | "u32" | "u64" | "u128" | "usize"
-                => Some(&color::Yellow),
+                => Some(color::FG_YELLOW.to_string()),
             "as" | "Err" | "false" | "None" | "Ok" | "Option" | "Result" | "self" | "Some" | "true"
-                => Some(&color::Cyan),
+                => Some(color::FG_CYAN.to_string()),
             "break" | "continue" | "crate" | "else" | "enum" | "extern" | "fn" | "for" | "if"
             | "impl" | "in" | "let" | "loop" | "match" | "mod" | "pub" | "return" | "struct"
             | "super" | "trait" | "type" | "use" | "where" | "while" | "async" | "await" | "dyn"
-                => Some(&color::Blue),
+                => Some(color::FG_BLUE.to_string()),
             _
                 => None
         }
@@ -482,16 +495,16 @@ impl Editor {
                 // TODO: make scrolling region end equal term height, not 200
                 format!(
                     "{}{}\x1b[{};200r{}\x1b[r",
-                    clear::UntilNewline,
+                    clear::LINE_RIGHT_OF_CURSOR,
                     self.move_cursor_to_new_line(),
                     self.cursor.y + 1,
-                    scroll::Down(1)
+                    scroll::DownBy(1)
                 )
             },
             '\t' => {
                 self.cursor.x += self.chars_left_until_next_tab();
 
-                self.update_cursor_position().into()
+                self.update_cursor_position().to_string()
             },
             _ => {
                 format!(
@@ -506,14 +519,14 @@ impl Editor {
 
 // cursor helpers
 impl Editor {
-    fn update_cursor_position(&self) -> cursor::Goto {
-        cursor::Goto(
+    fn update_cursor_position(&self) -> cursor::MoveToColumnAndRow {
+        cursor::MoveToColumnAndRow(
             u16::try_from(self.cursor.x + 1).unwrap(),
             u16::try_from(self.cursor.y + 1).unwrap()
         )
     }
 
-    fn move_cursor_to_horizontal_start(&mut self) -> Option<cursor::Goto> {
+    fn move_cursor_to_horizontal_start(&mut self) -> Option<cursor::MoveToColumnAndRow> {
         self.cursor.last_x = 0;
 
         if self.cursor.x == 0 {
@@ -525,7 +538,7 @@ impl Editor {
         Some(self.update_cursor_position())
     }
 
-    fn move_cursor_to_horizontal_end(&mut self) -> Option<cursor::Goto> {
+    fn move_cursor_to_horizontal_end(&mut self) -> Option<cursor::MoveToColumnAndRow> {
         self.cursor.last_x = self.lines[self.cursor.y].utf8_len();
 
         if self.cursor.x == self.cursor.last_x {
@@ -537,7 +550,7 @@ impl Editor {
         Some(self.update_cursor_position())
     }
 
-    fn move_cursor_to_vertical_start(&mut self) -> Option<cursor::Goto> {
+    fn move_cursor_to_vertical_start(&mut self) -> Option<cursor::MoveToColumnAndRow> {
         if self.cursor.y == 0 {
             return None;
         }
@@ -551,7 +564,7 @@ impl Editor {
         Some(self.update_cursor_position())
     }
 
-    fn move_cursor_to_vertical_end(&mut self) -> Option<cursor::Goto> {
+    fn move_cursor_to_vertical_end(&mut self) -> Option<cursor::MoveToColumnAndRow> {
         let last_line_i = self.lines.len() - 1;
 
         if self.cursor.y == last_line_i {
@@ -567,7 +580,7 @@ impl Editor {
         Some(self.update_cursor_position())
     }
 
-    fn move_cursor_up(&mut self) -> Option<cursor::Goto> {
+    fn move_cursor_up(&mut self) -> Option<cursor::MoveToColumnAndRow> {
         if self.cursor.y == 0 {
             if self.cursor.x == 0 {
                 self.cursor.last_x = 0;
@@ -587,7 +600,7 @@ impl Editor {
         Some(self.update_cursor_position())
     }
 
-    fn move_cursor_down(&mut self) -> Option<cursor::Goto> {
+    fn move_cursor_down(&mut self) -> Option<cursor::MoveToColumnAndRow> {
         let current_line_len = self.lines[self.cursor.y].utf8_len();
 
         if self.cursor.y == self.lines.len() - 1 {
@@ -609,7 +622,7 @@ impl Editor {
         Some(self.update_cursor_position())
     }
 
-    fn move_cursor_left(&mut self) -> Option<cursor::Goto> {
+    fn move_cursor_left(&mut self) -> Option<cursor::MoveToColumnAndRow> {
         if self.cursor.x == 0 {
             if self.cursor.y == 0 {
                 self.cursor.last_x = 0;
@@ -627,7 +640,7 @@ impl Editor {
         Some(self.update_cursor_position())
     }
 
-    fn move_cursor_right(&mut self) -> Option<cursor::Goto> {
+    fn move_cursor_right(&mut self) -> Option<cursor::MoveToColumnAndRow> {
         let current_line_len = self.lines[self.cursor.y].utf8_len();
 
         if self.cursor.x == current_line_len {
@@ -647,7 +660,7 @@ impl Editor {
         Some(self.update_cursor_position())
     }
 
-    fn move_cursor_to_prev_word(&mut self) -> Option<cursor::Goto> {
+    fn move_cursor_to_prev_word(&mut self) -> Option<cursor::MoveToColumnAndRow> {
         if self.cursor.x == 0 {
             return self.move_cursor_left();
         }
@@ -658,7 +671,7 @@ impl Editor {
         Some(self.update_cursor_position())
     }
 
-    fn move_cursor_to_next_word(&mut self) -> Option<cursor::Goto> {
+    fn move_cursor_to_next_word(&mut self) -> Option<cursor::MoveToColumnAndRow> {
         if self.cursor.x == self.lines[self.cursor.y].utf8_len() {
             return self.move_cursor_right();
         }
@@ -669,7 +682,7 @@ impl Editor {
         Some(self.update_cursor_position())
     }
 
-    fn move_cursor_to_new_line(&mut self) -> cursor::Goto {
+    fn move_cursor_to_new_line(&mut self) -> cursor::MoveToColumnAndRow {
         self.cursor.y      += 1;
         self.cursor.x       = 0;
         self.cursor.last_x  = 0;

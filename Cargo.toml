@@ -15,6 +15,7 @@ keywords     = ["editor", "text", "text-editor", "text-based"]
 categories   = ["text-editors", "command-line-utilities", "development-tools", "filesystem"]
 
 [dependencies]
+betterm = { git = "https://github.com/mochou-p/betterm" }
 termion = "4.0.5"
 
 [lints.clippy]
