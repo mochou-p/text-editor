@@ -1,5 +1,7 @@
 // text-editor/src/main.rs
 
+mod utf8;
+
 use std::io::{self, Stdout, Write as _};
 
 use betterm::{clear, color, cursor, screen, scroll, RESET_ALL};
@@ -8,6 +10,8 @@ use termion::event::{Event, Key, MouseEvent};
 use termion::input::{MouseTerminal, TermRead as _};
 use termion::raw::{RawTerminal, IntoRawMode as _};
 
+use utf8::{Utf8Len, Utf8Remove, Utf8Range, Utf8Drain, Utf8SplitOff, Utf8Insert, Utf8Index};
+
 
 fn main() {
     Editor::new().run();
@@ -15,7 +19,7 @@ fn main() {
 
 type SpecialStdout = MouseTerminal<RawTerminal<Stdout>>;
 
-#[derive(Default)]
+#[derive(Clone, Copy)]
 struct Cursor {
     last_x: usize,
     x:      usize,
@@ -24,6 +28,7 @@ struct Cursor {
 
 struct Editor {
     stdout: SpecialStdout,
+    file:   Option<String>,
     cursor: Cursor,
     lines:  Vec<String>
 }
@@ -36,20 +41,59 @@ impl Editor {
                 .into_raw_mode()
                 .unwrap()
         );
-        let cursor = Cursor::default();
 
-        let mut lines = Vec::with_capacity(2048);
-        lines.push(String::with_capacity(128));
+        let file = std::env::args().nth(1);
 
-        Self { stdout, cursor, lines }
+        let mut lines = {
+            file.as_ref()
+                .map_or_else(
+                    || Vec::with_capacity(2048),
+                    |file| {
+                        std::fs::read_to_string(file)
+                            .unwrap()
+                            .lines()
+                            .map(str::to_owned)
+                            .collect()
+                    }
+                )
+        };
+
+        if lines.is_empty() {
+            lines.push(String::with_capacity(128));
+        }
+
+        let cursor = {
+            let y = lines.len() - 1;
+            let x = lines[y].utf8_len();
+
+            Cursor { last_x: x, x, y }
+        };
+
+        Self { stdout, file, cursor, lines }
     }
 
     fn initialise(&mut self) {
         write!(
             self.stdout,
-            "{}{}{}",
+            "{}{}",
             screen::ENTER_ALTERNATE,
-            clear::WHOLE_SCREEN,
+            clear::WHOLE_SCREEN
+        ).unwrap();
+
+        if self.file.is_some() {
+            let old_cursor = self.cursor;
+
+            for i in 0..self.lines.len() {
+                self.cursor.y = i;
+                self.refresh();
+            }
+
+            self.cursor = old_cursor;
+        }
+
+        write!(
+            self.stdout,
+            "{}",
             self.update_cursor_position()
         ).unwrap();
 
@@ -68,11 +112,11 @@ impl Editor {
                 break;
             }
         }
-    }
-}
 
-impl Drop for Editor {
-    fn drop(&mut self) {
+        self.shutdown();
+    }
+
+    fn shutdown(&mut self) {
         write!(self.stdout, "{}", screen::LEAVE_ALTERNATE).unwrap();
         self.stdout.flush().unwrap();
 
@@ -87,7 +131,16 @@ impl Drop for Editor {
                 cursor::MOVE_TO_START_OF_NEXT_LINE
             );
         }
+
         self.stdout.flush().unwrap();
+
+        if let Some(file) = &self.file {
+            if self.cursor.y != 0 && self.lines.last().unwrap().is_empty() {
+                self.lines.push(String::new());
+            }
+
+            std::fs::write(file, self.lines.join("\n")).unwrap();
+        }
     }
 }
 
@@ -781,101 +834,4 @@ trait ToMaxWith: Ord + Copy {
 }
 
 impl ToMaxWith for usize {}
-
-trait Utf8Len {
-    fn utf8_len(&self) -> usize;
-}
-
-impl Utf8Len for str {
-    fn utf8_len(&self) -> usize {
-        self.chars().count()
-    }
-}
-
-impl Utf8Len for String {
-    fn utf8_len(&self) -> usize {
-        self.as_str().utf8_len()
-    }
-}
-
-trait Utf8Range {
-    fn utf8_range(&self, start: usize, end: usize) -> String;
-}
-
-impl Utf8Range for str {
-    fn utf8_range(&self, start: usize, end: usize) -> String {
-        self.chars()
-            .skip(start)
-            .take(end - start)
-            .collect()
-    }
-}
-
-impl Utf8Range for String {
-    fn utf8_range(&self, start: usize, end: usize) -> String {
-        self.as_str().utf8_range(start, end)
-    }
-}
-
-trait Utf8Index {
-    fn utf8_index(&self, idx: usize) -> usize;
-}
-
-impl Utf8Index for str {
-    fn utf8_index(&self, idx: usize) -> usize {
-        self.char_indices()
-            .nth(idx)
-            .map_or_else(|| self.len(), |(i, _)| i)
-    }
-}
-
-impl Utf8Index for String {
-    fn utf8_index(&self, idx: usize) -> usize {
-        self.as_str().utf8_index(idx)
-    }
-}
-
-trait Utf8Insert {
-    fn utf8_insert(&mut self, idx: usize, ch: char);
-}
-
-impl Utf8Insert for String {
-    fn utf8_insert(&mut self, idx: usize, ch: char) {
-        self.insert(self.utf8_index(idx), ch);
-    }
-}
-
-trait Utf8Remove {
-    fn utf8_remove(&mut self, idx: usize);
-}
-
-impl Utf8Remove for String {
-    fn utf8_remove(&mut self, idx: usize) {
-        self.remove(self.utf8_index(idx));
-    }
-}
-
-trait Utf8SplitOff {
-    fn utf8_split_off(&mut self, at: usize) -> String;
-}
-
-impl Utf8SplitOff for String {
-    fn utf8_split_off(&mut self, at: usize) -> String {
-        self.split_off(self.utf8_index(at))
-    }
-}
-
-trait Utf8Drain {
-    fn utf8_drain(&mut self, start: usize, end: usize);
-}
-
-impl Utf8Drain for String {
-    fn utf8_drain(&mut self, start: usize, end: usize) {
-        self.drain(
-            self.utf8_index(start)
-            ..
-            self.utf8_index(end)
-        );
-    }
-}
 
