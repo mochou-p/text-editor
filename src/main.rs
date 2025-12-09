@@ -1,5 +1,6 @@
 // text-editor/src/main.rs
 
+mod to;
 mod utf8;
 
 use std::io::{self, Stdout, Write as _};
@@ -10,6 +11,7 @@ use termion::event::{Event, Key, MouseEvent};
 use termion::input::{MouseTerminal, TermRead as _};
 use termion::raw::{RawTerminal, IntoRawMode as _};
 
+use to::{ToMaxWith, ToMinWith};
 use utf8::{Utf8Len, Utf8Remove, Utf8Range, Utf8Drain, Utf8SplitOff, Utf8Insert, Utf8Index};
 
 
@@ -19,23 +21,37 @@ fn main() {
 
 type SpecialStdout = MouseTerminal<RawTerminal<Stdout>>;
 
-#[derive(Clone, Copy)]
+#[derive(Default)]
 struct Cursor {
     last_x: usize,
     x:      usize,
     y:      usize
 }
 
+struct Terminal {
+    height: usize
+}
+
+#[derive(Default)]
+struct Scroll {
+    y: usize
+}
+
 struct Editor {
-    stdout: SpecialStdout,
-    file:   Option<String>,
-    cursor: Cursor,
-    lines:  Vec<String>
+    temp_exit: bool,
+    stdout:    SpecialStdout,
+    file:      Option<String>,
+    cursor:    Cursor,
+    terminal:  Terminal,
+    scroll:    Scroll,
+    lines:     Vec<String>
 }
 
 // main functions
 impl Editor {
     fn new() -> Self {
+        let temp_exit = false;
+
         let stdout = MouseTerminal::from(
             io::stdout()
                 .into_raw_mode()
@@ -62,14 +78,21 @@ impl Editor {
             lines.push(String::with_capacity(128));
         }
 
-        let cursor = {
-            let y = lines.len() - 1;
-            let x = lines[y].utf8_len();
+        // TODO: save and restore last position
+        let cursor = Cursor::default();
 
-            Cursor { last_x: x, x, y }
+        let terminal = {
+            let height = {
+                let size = termion::terminal_size().unwrap();
+                size.1 as usize
+            };
+
+            Terminal { height }
         };
 
-        Self { stdout, file, cursor, lines }
+        let scroll = Scroll::default();
+
+        Self { temp_exit, stdout, file, cursor, terminal, scroll, lines, }
     }
 
     fn initialise(&mut self) {
@@ -81,15 +104,14 @@ impl Editor {
         ).unwrap();
 
         if self.file.is_some() {
-            let old_cursor = self.cursor;
-
-            for i in 0..self.lines.len() {
+            for i in 0..self.lines.len().min(self.terminal.height) {
                 self.cursor.y = i;
                 self.refresh();
             }
-
-            self.cursor = old_cursor;
         }
+
+        // TODO: scroll to restored cursor
+        self.cursor.y = 0;
 
         write!(
             self.stdout,
@@ -111,6 +133,11 @@ impl Editor {
             if should_exit {
                 break;
             }
+
+            if self.temp_exit {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                break;
+            }
         }
 
         self.shutdown();
@@ -120,20 +147,13 @@ impl Editor {
         write!(self.stdout, "{}", screen::LEAVE_ALTERNATE).unwrap();
         self.stdout.flush().unwrap();
 
-        for (i, line) in self.lines.iter().enumerate() {
-            print!(
-                "{:>4}: {}^{}{line}{}${}{}",
-                i + 1,
-                color::FG_BLACK,
-                color::UNSET_FG,
-                color::FG_BLACK,
-                color::UNSET_FG,
-                cursor::MOVE_TO_START_OF_NEXT_LINE
-            );
-        }
+        self.save_file();
+    }
+}
 
-        self.stdout.flush().unwrap();
-
+// filesystem
+impl Editor {
+    fn save_file(&mut self) {
         if let Some(file) = &self.file {
             if self.cursor.y != 0 && self.lines.last().unwrap().is_empty() {
                 self.lines.push(String::new());
@@ -185,6 +205,7 @@ impl Editor {
             Key::Backspace => self.handle_backspace(false),
             Key::Ctrl('h') => self.handle_backspace(true),
             Key::Delete    => self.handle_delete(false),
+            Key::Ctrl('s') => self.save_file(),
             Key::Esc       => { return true; },
             _              => ()
         }
@@ -456,7 +477,7 @@ impl Editor {
                 u16::try_from(
                     line[..word.start].utf8_len() + 1
                 ).unwrap(),
-                u16::try_from(self.cursor.y + 1).unwrap()
+                u16::try_from(self.cursor.y + 1 - self.scroll.y).unwrap()
             )
         ).unwrap();
 
@@ -573,9 +594,14 @@ impl Editor {
 // cursor helpers
 impl Editor {
     fn update_cursor_position(&self) -> cursor::MoveToColumnAndRow {
+        let     x = self.cursor.x + 1;
+        let mut y = self.cursor.y + 1;
+
+        y -= self.scroll.y;
+
         cursor::MoveToColumnAndRow(
-            u16::try_from(self.cursor.x + 1).unwrap(),
-            u16::try_from(self.cursor.y + 1).unwrap()
+            u16::try_from(x).unwrap(),
+            u16::try_from(y).unwrap()
         )
     }
 
@@ -640,7 +666,7 @@ impl Editor {
                 return None;
             }
 
-            self.cursor.x = 0;
+            self.cursor.x      = 0;
             self.cursor.last_x = self.cursor.x;
         } else {
             self.cursor.y -= 1;
@@ -648,6 +674,15 @@ impl Editor {
             self.cursor.x
                 .to_max_with(self.cursor.last_x)
                 .to_min_with(self.lines[self.cursor.y].utf8_len());
+
+            if self.cursor.y + 1 - self.scroll.y == 0 {
+                self.scroll.y -= 1;
+
+                write!(self.stdout, "{}", scroll::DOWN).unwrap();
+                self.refresh();
+
+                return None;
+            }
         }
 
         Some(self.update_cursor_position())
@@ -670,6 +705,15 @@ impl Editor {
             self.cursor.x
                 .to_max_with(self.cursor.last_x)
                 .to_min_with(self.lines[self.cursor.y].utf8_len());
+
+            if self.cursor.y - 1 - self.scroll.y == self.terminal.height - 1 {
+                self.scroll.y += 1;
+
+                write!(self.stdout, "{}", scroll::UP).unwrap();
+                self.refresh();
+
+                return None;
+            }
         }
 
         Some(self.update_cursor_position())
@@ -684,6 +728,15 @@ impl Editor {
 
             self.cursor.y -= 1;
             self.cursor.x  = self.lines[self.cursor.y].utf8_len();
+
+            if self.cursor.y + 1 - self.scroll.y == 0 {
+                self.scroll.y -= 1;
+
+                write!(self.stdout, "{}", scroll::DOWN).unwrap();
+                self.refresh();
+
+                return None;
+            }
         } else {
             self.cursor.x -= 1;
         }
@@ -705,6 +758,15 @@ impl Editor {
             self.cursor.y      += 1;
             self.cursor.x       = 0;
             self.cursor.last_x  = 0;
+
+            if self.cursor.y - 1 - self.scroll.y == self.terminal.height - 1 {
+                self.scroll.y += 1;
+
+                write!(self.stdout, "{}", scroll::UP).unwrap();
+                self.refresh();
+
+                return None;
+            }
         } else {
             self.cursor.x      += 1;
             self.cursor.last_x  = self.cursor.x;
@@ -816,22 +878,4 @@ impl Editor {
             )
     }
 }
-
-trait ToMinWith: Ord + Copy {
-    fn to_min_with(&mut self, rhs: Self) -> &mut Self {
-        *self = (*self).min(rhs);
-        self
-    }
-}
-
-impl ToMinWith for usize {}
-
-trait ToMaxWith: Ord + Copy {
-    fn to_max_with(&mut self, rhs: Self) -> &mut Self {
-        *self = (*self).max(rhs);
-        self
-    }
-}
-
-impl ToMaxWith for usize {}
 
