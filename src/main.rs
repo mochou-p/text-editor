@@ -162,7 +162,7 @@ impl Editor {
         write!(self.stdout, "{}", screen::LEAVE_ALTERNATE).unwrap();
         self.stdout.flush().unwrap();
 
-        if (self.config.preferences.0 & PreferenceMask::SAVE_FILE_ON_EXIT) != 0 {
+        if (self.config.preferences.0 & PreferenceMask::FILE_SAVE_ON_EDITOR_EXIT) != 0 {
             ACTIONS[Action::FILE_SAVE](self);
         }
     }
@@ -180,6 +180,52 @@ impl Editor {
             u16::try_from(x).unwrap(),
             u16::try_from(y).unwrap()
         )
+    }
+
+    fn wrapping_move_left(&mut self) -> bool {
+        if self.cursor.y == 0 {
+            self.cursor.last_x = 0;
+            return false;
+        }
+
+        self.cursor.y -= 1;
+        self.cursor.x  = self.lines[self.cursor.y].utf8_len();
+
+        if self.cursor.y + 1 - self.scroll.y == 0 {
+            self.scroll.y -= 1;
+
+            write!(self.stdout, "{}", scroll::DOWN).unwrap();
+            self.refresh();
+
+            // TODO: doesnt this leave last_x wrong?
+            return false;
+        }
+
+        true
+    }
+
+    fn wrapping_move_right(&mut self) ->bool {
+        let current_line_len = self.lines[self.cursor.y].utf8_len();
+
+        if self.cursor.y == self.lines.len() - 1 {
+            self.cursor.last_x = current_line_len;
+            return false;
+        }
+
+        self.cursor.y      += 1;
+        self.cursor.x       = 0;
+        self.cursor.last_x  = 0;
+
+        if self.cursor.y - 1 - self.scroll.y == self.terminal.height - 1 {
+            self.scroll.y += 1;
+
+            write!(self.stdout, "{}", scroll::UP).unwrap();
+            self.refresh();
+
+            return false;
+        }
+
+        true
     }
 
     fn handle_char_key(&mut self, ch: char) {

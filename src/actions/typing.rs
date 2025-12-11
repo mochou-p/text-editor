@@ -4,14 +4,18 @@ use std::io::Write as _;
 
 use betterm::clear;
 
-use crate::utf8::{Utf8Len, Utf8Range, Utf8Drain};
-
 use crate::Editor;
+use crate::preferences::PreferenceMask;
+use crate::utf8::{Utf8Len, Utf8Range, Utf8Drain};
 
 
 pub fn erase_character_left(editor: &mut Editor) {
     if editor.cursor.x == 0 {
-        if editor.cursor.y == 0 {
+        if
+            (editor.config.preferences.0 & PreferenceMask::TYPING_ERASE_CHARACTER_LEFT_WRAPS_AT_LINE_BOUNDARY) == 0
+            ||
+            editor.cursor.y == 0
+        {
             editor.cursor.last_x = 0;
             return;
         }
@@ -26,9 +30,36 @@ pub fn erase_character_left(editor: &mut Editor) {
     editor.refresh();
 }
 
+pub fn erase_character_right(editor: &mut Editor) {
+    let current_line_len = editor.lines[editor.cursor.y].utf8_len();
+
+    if editor.cursor.x == current_line_len {
+        if
+            (editor.config.preferences.0 & PreferenceMask::TYPING_ERASE_CHARACTER_RIGHT_WRAPS_AT_LINE_BOUNDARY) == 0
+            ||
+            editor.cursor.y == editor.lines.len() - 1
+        {
+            editor.cursor.last_x = current_line_len;
+            return;
+        }
+
+        editor.wrapping_erase_character_right();
+    } else {
+        editor.normal_erase_character_right();
+    }
+
+    editor.stdout.flush().unwrap();
+
+    editor.refresh();
+}
+
 pub fn erase_word_left(editor: &mut Editor) {
     if editor.cursor.x == 0 {
-        if editor.cursor.y == 0 {
+        if
+            (editor.config.preferences.0 & PreferenceMask::TYPING_ERASE_WORD_LEFT_WRAPS_AT_LINE_BOUNDARY) == 0
+            ||
+            editor.cursor.y == 0
+        {
             editor.cursor.last_x = 0;
             return;
         }
@@ -56,30 +87,15 @@ pub fn erase_word_left(editor: &mut Editor) {
     editor.stdout.flush().unwrap();
 }
 
-pub fn erase_character_right(editor: &mut Editor) {
-    let current_line_len = editor.lines[editor.cursor.y].utf8_len();
-
-    if editor.cursor.x == current_line_len {
-        if editor.cursor.y == editor.lines.len() - 1 {
-            editor.cursor.last_x = current_line_len;
-            return;
-        }
-
-        editor.wrapping_erase_character_right();
-    } else {
-        editor.normal_erase_character_right();
-    }
-
-    editor.stdout.flush().unwrap();
-
-    editor.refresh();
-}
-
 pub fn erase_word_right(editor: &mut Editor) {
     let current_line_len = editor.lines[editor.cursor.y].utf8_len();
 
     if editor.cursor.x == current_line_len {
-        if editor.cursor.y == editor.lines.len() - 1 {
+        if
+            (editor.config.preferences.0 & PreferenceMask::TYPING_ERASE_WORD_RIGHT_WRAPS_AT_LINE_BOUNDARY) == 0
+            ||
+            editor.cursor.y == editor.lines.len() - 1
+        {
             editor.cursor.last_x = current_line_len;
             return;
         }

@@ -5,12 +5,17 @@ use std::io::Write as _;
 use betterm::scroll;
 
 use crate::Editor;
+use crate::preferences::PreferenceMask;
 use crate::to::{ToMaxWith, ToMinWith};
 use crate::utf8::Utf8Len;
 
 
 pub fn move_up(editor: &mut Editor) {
     if editor.cursor.y == 0 {
+        if (editor.config.preferences.0 & PreferenceMask::CURSOR_MOVE_UP_GOES_TO_START_OF_FILE_AT_FIRST_LINE) == 0 {
+            return;
+        }
+
         if editor.cursor.x == 0 {
             editor.cursor.last_x = 0;
             return;
@@ -19,13 +24,23 @@ pub fn move_up(editor: &mut Editor) {
         editor.cursor.x      = 0;
         editor.cursor.last_x = editor.cursor.x;
     } else {
+        let will_scroll = editor.cursor.y - editor.scroll.y == 0;
+
+        if
+            will_scroll
+            &&
+            (editor.config.preferences.0 & PreferenceMask::CURSOR_MOVE_UP_SCROLLS_AT_SCREEN_BOUNDARY) == 0
+        {
+            return;
+        }
+
         editor.cursor.y -= 1;
 
         editor.cursor.x
             .to_max_with(editor.cursor.last_x)
             .to_min_with(editor.lines[editor.cursor.y].utf8_len());
 
-        if editor.cursor.y + 1 - editor.scroll.y == 0 {
+        if will_scroll {
             editor.scroll.y -= 1;
 
             write!(editor.stdout, "{}", scroll::DOWN).unwrap();
@@ -48,6 +63,10 @@ pub fn move_down(editor: &mut Editor) {
     let current_line_len = editor.lines[editor.cursor.y].utf8_len();
 
     if editor.cursor.y == editor.lines.len() - 1 {
+        if (editor.config.preferences.0 & PreferenceMask::CURSOR_MOVE_DOWN_GOES_TO_END_OF_FILE_AT_LAST_LINE) == 0 {
+            return;
+        }
+
         if editor.cursor.x == current_line_len {
             editor.cursor.last_x = current_line_len;
             return;
@@ -56,13 +75,23 @@ pub fn move_down(editor: &mut Editor) {
         editor.cursor.x      = editor.lines[editor.cursor.y].utf8_len();
         editor.cursor.last_x = editor.cursor.x;
     } else {
+        let will_scroll = editor.cursor.y - editor.scroll.y == editor.terminal.height - 1;
+
+        if
+            will_scroll
+            &&
+            (editor.config.preferences.0 & PreferenceMask::CURSOR_MOVE_DOWN_SCROLLS_AT_SCREEN_BOUNDARY) == 0
+        {
+            return;
+        }
+
         editor.cursor.y += 1;
 
         editor.cursor.x
             .to_max_with(editor.cursor.last_x)
             .to_min_with(editor.lines[editor.cursor.y].utf8_len());
 
-        if editor.cursor.y - 1 - editor.scroll.y == editor.terminal.height - 1 {
+        if will_scroll {
             editor.scroll.y += 1;
 
             write!(editor.stdout, "{}", scroll::UP).unwrap();
@@ -83,20 +112,12 @@ pub fn move_down(editor: &mut Editor) {
 
 pub fn move_left(editor: &mut Editor) {
     if editor.cursor.x == 0 {
-        if editor.cursor.y == 0 {
+        if (editor.config.preferences.0 & PreferenceMask::CURSOR_MOVE_LEFT_WRAPS_AT_LINE_BOUNDARY) == 0 {
             editor.cursor.last_x = 0;
             return;
         }
 
-        editor.cursor.y -= 1;
-        editor.cursor.x  = editor.lines[editor.cursor.y].utf8_len();
-
-        if editor.cursor.y + 1 - editor.scroll.y == 0 {
-            editor.scroll.y -= 1;
-
-            write!(editor.stdout, "{}", scroll::DOWN).unwrap();
-            editor.refresh();
-
+        if !editor.wrapping_move_left() {
             return;
         }
     } else {
@@ -118,21 +139,12 @@ pub fn move_right(editor: &mut Editor) {
     let current_line_len = editor.lines[editor.cursor.y].utf8_len();
 
     if editor.cursor.x == current_line_len {
-        if editor.cursor.y == editor.lines.len() - 1 {
+        if (editor.config.preferences.0 & PreferenceMask::CURSOR_MOVE_RIGHT_WRAPS_AT_LINE_BOUNDARY) == 0 {
             editor.cursor.last_x = current_line_len;
             return;
         }
 
-        editor.cursor.y      += 1;
-        editor.cursor.x       = 0;
-        editor.cursor.last_x  = 0;
-
-        if editor.cursor.y - 1 - editor.scroll.y == editor.terminal.height - 1 {
-            editor.scroll.y += 1;
-
-            write!(editor.stdout, "{}", scroll::UP).unwrap();
-            editor.refresh();
-
+        if !editor.wrapping_move_right() {
             return;
         }
     } else {
@@ -151,8 +163,14 @@ pub fn move_right(editor: &mut Editor) {
 
 pub fn move_to_previous_word(editor: &mut Editor) {
     if editor.cursor.x == 0 {
-        move_left(editor);
-        return;
+        if (editor.config.preferences.0 & PreferenceMask::CURSOR_MOVE_TO_PREVIOUS_WORD_WRAPS_AT_LINE_BOUNDARY) == 0 {
+            editor.cursor.last_x = 0;
+            return;
+        }
+
+        if !editor.wrapping_move_left() {
+            return;
+        }
     }
 
     editor.cursor.x      = editor.utf8_position_of_left_whitespace();
@@ -168,9 +186,17 @@ pub fn move_to_previous_word(editor: &mut Editor) {
 }
 
 pub fn move_to_next_word(editor: &mut Editor) {
-    if editor.cursor.x == editor.lines[editor.cursor.y].utf8_len() {
-        move_right(editor);
-        return;
+    let current_line_len = editor.lines[editor.cursor.y].utf8_len();
+
+    if editor.cursor.x == current_line_len {
+        if (editor.config.preferences.0 & PreferenceMask::CURSOR_MOVE_TO_NEXT_WORD_WRAPS_AT_LINE_BOUNDARY) == 0 {
+            editor.cursor.last_x = current_line_len;
+            return;
+        }
+
+        if !editor.wrapping_move_right() {
+            return;
+        }
     }
 
     editor.cursor.x      += editor.utf8_offset_to_right_whitespace();

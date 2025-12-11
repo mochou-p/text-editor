@@ -35,7 +35,7 @@ pub const ACTIONS: [ActionFn; 16] = [
 
 pub struct Action;
 
-// TODO: convert to macro or refactor
+// TODO: macro/refactor
 impl Action {
     pub const EDITOR_EXIT:                  ActionIndex =  0;
 
@@ -55,6 +55,6 @@ impl Action {
     pub const TYPING_ERASE_CHARACTER_LEFT:  ActionIndex = 12;
     pub const TYPING_ERASE_CHARACTER_RIGHT: ActionIndex = 13;
     pub const TYPING_ERASE_WORD_LEFT:       ActionIndex = 14;
-    // pub const TYPING_ERASE_WORD_RIGHT:      ActionIndex = 15;
+    pub const TYPING_ERASE_WORD_RIGHT:      ActionIndex = 15;
 }
 

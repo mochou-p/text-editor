@@ -28,8 +28,8 @@ impl Default for Keybinds {
 
             (Event::Key(Key::Backspace), Action::TYPING_ERASE_CHARACTER_LEFT ),
             (Event::Key(Key::Delete   ), Action::TYPING_ERASE_CHARACTER_RIGHT),
-            (events::CTRL_BACKSPACE,     Action::TYPING_ERASE_WORD_LEFT      ),
-            // (events::CTRL_DELETE,        Action::TYPING_ERASE_WORD_RIGHT     ),
+            (events::CTRL_BACKSPACE    , Action::TYPING_ERASE_WORD_LEFT      ),
+            (events::ctrl_delete()     , Action::TYPING_ERASE_WORD_RIGHT     )
         ]))
     }
 }
