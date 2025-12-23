@@ -47,6 +47,7 @@ struct Scroll {
 
 pub struct Editor {
     exit:     bool,
+    clean:    bool,
     stdout:   SpecialStdout,
     config:   Config,
     file:     Option<String>,
@@ -59,7 +60,8 @@ pub struct Editor {
 // main functions
 impl Editor {
     fn new() -> Self {
-        let exit = false;
+        let exit  = false;
+        let clean = true;
 
         let stdout = MouseTerminal::from(
             io::stdout()
@@ -103,7 +105,7 @@ impl Editor {
 
         let scroll = Scroll::default();
 
-        Self { exit, stdout, config, file, cursor, terminal, scroll, lines }
+        Self { exit, clean, stdout, config, file, cursor, terminal, scroll, lines }
     }
 
     fn initialise(&mut self) {
@@ -141,6 +143,7 @@ impl Editor {
         for event in stdin.events() {
             let event = event.unwrap();
 
+            // printable
             if let Event::Key(Key::Char(c)) = event {
                 self.handle_char_key(c);
                 continue;
@@ -229,6 +232,8 @@ impl Editor {
     }
 
     fn handle_char_key(&mut self, ch: char) {
+        self.clean = false;
+
         self.insert_char(ch);
 
         let printable = self.print_char(ch);
@@ -239,6 +244,8 @@ impl Editor {
     }
 
     fn normal_erase_character_left(&mut self) {
+        self.clean = false;
+
         self.cursor.x      -= 1;
         self.cursor.last_x  = self.cursor.x;
 
@@ -254,6 +261,8 @@ impl Editor {
     }
 
     fn wrapping_erase_character_left(&mut self) {
+        self.clean = false;
+
         let moved_line = self.lines.remove(self.cursor.y);
 
         self.cursor.y      -= 1;
@@ -263,17 +272,33 @@ impl Editor {
         self.lines[self.cursor.y]
             .push_str(&moved_line);
 
-        // TODO: make scrolling region end equal term height, not 200
-        write!(
-            self.stdout,
-            "\x1b[{};200r{}\x1b[r{}{moved_line}",
-            self.cursor.y + 1,
-            scroll::UpBy(1),
-            self.update_cursor_position()
-        ).unwrap();
+        let y = self.cursor.y - self.scroll.y;
+        if y == self.terminal.height - 2 {
+            self.cursor.y += 1;
+            write!(self.stdout, "{}{}", cursor::MOVE_DOWN, clear::LINE_RIGHT_OF_CURSOR).unwrap();
+            self.refresh();
+            self.cursor.y -= 1;
+        } else {
+            write!(
+                self.stdout,
+                "\x1b[{};{}r{}\x1b[r",
+                y + 2,
+                self.terminal.height,
+                scroll::UpBy(1)
+            ).unwrap();
+
+            let old_y     = self.cursor.y;
+            self.cursor.y = self.terminal.height - y + self.cursor.y - 1;
+
+            self.refresh();
+
+            self.cursor.y = old_y;
+        }
     }
 
     fn normal_erase_character_right(&mut self) {
+        self.clean = false;
+
         self.cursor.last_x = self.cursor.x;
 
         self.lines[self.cursor.y].utf8_remove(self.cursor.x);
@@ -287,6 +312,8 @@ impl Editor {
     }
 
     fn wrapping_erase_character_right(&mut self) {
+        self.clean = false;
+
         let moved_line = self.lines.remove(self.cursor.y + 1);
 
         self.cursor.last_x = self.cursor.x;
@@ -294,14 +321,30 @@ impl Editor {
         self.lines[self.cursor.y]
             .push_str(&moved_line);
 
-        // TODO: make scrolling region end equal term height, not 200
-        write!(
-            self.stdout,
-            "{moved_line}\x1b[{};200r{}\x1b[r{}",
-            self.cursor.y + 2,
-            scroll::UpBy(1),
-            self.update_cursor_position()
-        ).unwrap();
+        let y = self.cursor.y - self.scroll.y;
+        if y == self.terminal.height - 1 {
+        } else if y == self.terminal.height - 2 {
+            self.cursor.y += 1;
+            write!(self.stdout, "{}{}", cursor::MOVE_DOWN, clear::WHOLE_LINE).unwrap();
+            self.refresh();
+            self.cursor.y -= 1;
+        } else {
+            write!(
+                self.stdout,
+                "\x1b[{};{}r{}\x1b[r{}",
+                y + 2,
+                self.terminal.height,
+                scroll::UpBy(1),
+                self.update_cursor_position()
+            ).unwrap();
+
+            let old_y     = self.cursor.y;
+            self.cursor.y = self.terminal.height - y + self.cursor.y - 1;
+
+            self.refresh();
+
+            self.cursor.y = old_y;
+        }
     }
 
     fn insert_char(&mut self, ch: char) {
@@ -328,19 +371,47 @@ impl Editor {
     }
 
     fn print_char(&mut self, ch: char) -> String {
+        self.clean = false;
+
         match ch {
             '\n' => {
-                // TODO: make scrolling region end equal term height, not 200
-                format!(
-                    "{}{}\x1b[{};200r{}\x1b[r",
-                    clear::LINE_RIGHT_OF_CURSOR,
-                    self.move_cursor_to_new_line(),
-                    self.cursor.y + 1,
-                    scroll::DownBy(1)
-                )
+                // TODO: temp?
+                self.refresh();
+
+                // TODO: temp
+                let y = self.cursor.y - self.scroll.y;
+                if y == self.terminal.height - 1 {
+                    self.scroll.y += 1;
+
+                    format!(
+                        "{}{}{}",
+                        clear::LINE_RIGHT_OF_CURSOR,
+                        scroll::UP,
+                        self.move_cursor_to_new_line()
+                    )
+                } else if y == self.terminal.height - 2 {
+                    format!(
+                        "{}{}{}",
+                        clear::LINE_RIGHT_OF_CURSOR,
+                        self.move_cursor_to_new_line(),
+                        clear::LINE_RIGHT_OF_CURSOR
+                    )
+                } else {
+                    format!(
+                        "{}{}\x1b[{};{}r{}\x1b[r",
+                        clear::LINE_RIGHT_OF_CURSOR,
+                        self.move_cursor_to_new_line(),
+                        y + 2,
+                        self.terminal.height,
+                        scroll::DOWN
+                    )
+                }
             },
             '\t' => {
                 self.cursor.x += self.chars_left_until_next_tab();
+
+                // TODO: temp
+                write!(self.stdout, "{}", clear::WHOLE_LINE).unwrap();
 
                 self.update_cursor_position().to_string()
             },

@@ -15,6 +15,8 @@ impl Default for Keybinds {
         Self(HashMap::from([
             (Event::Key(Key::Esc      ), Action::EDITOR_EXIT                 ),
 
+            (Event::Key(Key::Ctrl('s')), Action::FILE_SAVE                   ),
+
             (Event::Key(Key::Left     ), Action::CURSOR_MOVE_LEFT            ),
             (Event::Key(Key::Right    ), Action::CURSOR_MOVE_RIGHT           ),
             (Event::Key(Key::Up       ), Action::CURSOR_MOVE_UP              ),

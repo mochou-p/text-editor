@@ -26,7 +26,7 @@ impl Editor {
     pub fn refresh(&mut self) {
         let words = self.parse_current_line_into_words();
 
-        self.refresh_colors(words);
+        self.refresh_colors(&words);
     }
 
     fn parse_current_line_into_words(&self) -> Vec<Word> {
@@ -64,7 +64,7 @@ impl Editor {
     }
 
     // TODO: make it context-aware and more sophisticated
-    fn refresh_colors(&mut self, words: Vec<Word>) {
+    fn refresh_colors(&mut self, words: &[Word]) {
         for word in words {
             self.try_colorise_word(word);
         }
@@ -79,7 +79,7 @@ impl Editor {
         self.stdout.flush().unwrap();
     }
 
-    fn try_colorise_word(&mut self, word: Word) {
+    fn try_colorise_word(&mut self, word: &Word) {
         let line = &self.lines[self.cursor.y];
         let text = &line[word.start..word.end];
 

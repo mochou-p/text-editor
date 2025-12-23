@@ -82,6 +82,8 @@ pub fn erase_word_left(editor: &mut Editor) {
             clear::LINE_RIGHT_OF_CURSOR,
             editor.update_cursor_position()
         ).unwrap();
+
+        editor.clean = false;
     }
 
     editor.stdout.flush().unwrap();
@@ -116,6 +118,8 @@ pub fn erase_word_right(editor: &mut Editor) {
             clear::LINE_RIGHT_OF_CURSOR,
             editor.update_cursor_position()
         ).unwrap();
+
+        editor.clean = false;
     }
 
     editor.stdout.flush().unwrap();
