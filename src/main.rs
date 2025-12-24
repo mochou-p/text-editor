@@ -272,7 +272,16 @@ impl Editor {
         self.lines[self.cursor.y]
             .push_str(&moved_line);
 
-        let y = self.cursor.y - self.scroll.y;
+        // TODO: quick and dirty underflow check, will refactor to a proper solution,
+        //       when proper scroll exists (i.e. when cursor can leave the screen)
+        let mut y = self.cursor.y + 1 - self.scroll.y;
+        if y == 0 {
+            self.scroll.y -= 1;
+            write!(self.stdout, "{}", clear::LINE_RIGHT_OF_CURSOR).unwrap();
+            return;
+        }
+        y -= 1;
+
         if y == self.terminal.height - 2 {
             self.cursor.y += 1;
             write!(self.stdout, "{}{}", cursor::MOVE_DOWN, clear::LINE_RIGHT_OF_CURSOR).unwrap();
