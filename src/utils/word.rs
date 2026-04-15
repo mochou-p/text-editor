@@ -1,13 +1,9 @@
-// mochou-p/text-editor/src/utils.rs
+// mochou-p/text-editor/src/utils/word.rs
 
-use crate::utf8::Utf8;
+use super::Utf8;
 
 
-pub fn is_alphanumericx(ch: char) -> bool {
-    ch == '_' || ch.is_alphanumeric()
-}
-
-pub fn find_to_left(string: &str, mut i: isize, f: impl Fn(char) -> bool) -> Option<isize> {
+pub fn to_left(string: &str, mut i: isize, f: impl Fn(char) -> bool) -> Option<isize> {
     let mut index = None;
 
     loop {
@@ -26,7 +22,7 @@ pub fn find_to_left(string: &str, mut i: isize, f: impl Fn(char) -> bool) -> Opt
     index
 }
 
-pub fn find_to_right(string: &str, mut i: isize, f: impl Fn(char) -> bool) -> Option<isize> {
+pub fn to_right(string: &str, mut i: isize, f: impl Fn(char) -> bool) -> Option<isize> {
     let mut index = None;
 
     loop {

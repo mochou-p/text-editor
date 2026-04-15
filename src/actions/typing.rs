@@ -1,8 +1,7 @@
 // mochou-p/text-editor/src/actions/typing.rs
 
 use crate::Editor;
-use crate::utf8::{Utf8, Utf8Mut};
-use crate::utils;
+use crate::utils::{self, Utf8, Utf8Mut, word};
 
 
 pub fn newline(editor: &mut Editor) {
@@ -161,9 +160,9 @@ pub fn erase_prev_word(editor: &mut Editor) {
         let start = line.chars().nth((cursor.x - 1) as usize).unwrap();
 
         let end = if utils::is_alphanumericx(start) {
-            utils::find_to_left(line, cursor.x, |ch| !utils::is_alphanumericx(ch))
+            word::to_left(line, cursor.x, |ch| !utils::is_alphanumericx(ch))
         } else {
-            utils::find_to_left(line, cursor.x, |ch| ch != start)
+            word::to_left(line, cursor.x, |ch| ch != start)
         };
 
         let old_x     = cursor.x;
@@ -193,9 +192,9 @@ pub fn erase_next_word(editor: &mut Editor) {
         let start = line.chars().nth(cursor.x as usize).unwrap();
 
         let end = if utils::is_alphanumericx(start) {
-            utils::find_to_right(line, cursor.x, |ch| !utils::is_alphanumericx(ch))
+            word::to_right(line, cursor.x, |ch| !utils::is_alphanumericx(ch))
         } else {
-            utils::find_to_right(line, cursor.x, |ch| ch != start)
+            word::to_right(line, cursor.x, |ch| ch != start)
         };
 
         cursor.last_x = cursor.x;

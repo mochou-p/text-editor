@@ -1,9 +1,7 @@
 // mochou-p/text-editor/src/main.rs
 
 mod actions;
-mod keybinds;
-mod to;
-mod utf8;
+mod config;
 mod utils;
 
 use std::collections::HashMap;
@@ -17,9 +15,8 @@ use termion::event::{Event, Key, MouseEvent, MouseButton};
 use termion::input::{MouseTerminal, TermRead as _};
 use termion::raw::{RawTerminal, IntoRawMode as _};
 
-use keybinds::Keybinds;
-use to::ToMinWith;
-use utf8::Utf8;
+use config::{Keybinds, Theme};
+use utils::{ToWith, Utf8};
 
 
 static PANIC_LOCATION: OnceLock<String> = OnceLock::new();
@@ -46,6 +43,7 @@ pub struct Editor {
     exit:     bool,
     stdout:   MouseTerminal<RawTerminal<Stdout>>,
     keybinds: Keybinds,
+    theme:    Theme,
     files:    HashMap<String, File>,
     view:     View
 }
@@ -89,6 +87,7 @@ impl Editor {
             exit:     false,
             stdout:   MouseTerminal::from(io::stdout().into_raw_mode().unwrap()),
             keybinds: Keybinds::default(),
+            theme:    Theme::default(),
             files:    HashMap::from([(file.clone(), File {
                 clean:   true,
                 cursors: vec![Cursor { last_x: 0, x: 0, y: 0 }],
@@ -219,9 +218,9 @@ impl Editor {
                 let cursor_line  = y == self.files[&self.view.file].cursors[0].y;
 
                 let style = if cursor_line {
-                    (color::BgRgb(49, 50, 68), color::FgRgb(137, 180, 250))
+                    (&self.theme.cursor_bg, &self.theme.cursor_fg)
                 } else {
-                    (color::BgRgb(30, 30, 46), color::FgRgb(205, 214, 244))
+                    (&self.theme.bg,        &self.theme.fg       )
                 };
 
                 write!(
@@ -248,7 +247,7 @@ impl Editor {
                         cursor::MoveToColumn(
                             (self.view.position.x + 1 + (line_len - count) as isize) as u16
                         ),
-                        color::BgRgb(243, 139, 168),
+                        self.theme.bad_trail,
                         " ".repeat(count)
                     ).unwrap();
                 }
@@ -256,7 +255,7 @@ impl Editor {
                 write!(
                     self.stdout,
                     "{}{}{}",
-                    color::BgRgb(17, 17, 27),
+                    self.theme.void,
                     cursor::MoveToColumnAndRow(
                         (self.view.position.x + 1    ) as u16,
                         (self.view.position.y + 1 + i) as u16),

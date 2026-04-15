@@ -1,9 +1,7 @@
 // mochou-p/text-editor/src/actions/cursor.rs
 
 use crate::Editor;
-use crate::to::{ToMinWith, ToMaxWith};
-use crate::utf8::Utf8;
-use crate::utils;
+use crate::utils::{self, ToWith, Utf8, word};
 
 
 pub fn line_start(editor: &mut Editor) {
@@ -174,9 +172,9 @@ pub fn prev_word(editor: &mut Editor) {
         let start = line.chars().nth((cursor.x - 1) as usize).unwrap();
 
         let end = if utils::is_alphanumericx(start) {
-            utils::find_to_left(line, cursor.x, |ch| !utils::is_alphanumericx(ch))
+            word::to_left(line, cursor.x, |ch| !utils::is_alphanumericx(ch))
         } else {
-            utils::find_to_left(line, cursor.x, |ch| ch != start)
+            word::to_left(line, cursor.x, |ch| ch != start)
         };
 
         cursor.x      = end.map(|i| i+1).unwrap_or(0);
@@ -202,9 +200,9 @@ pub fn next_word(editor: &mut Editor) {
         let start = line.chars().nth(cursor.x as usize).unwrap();
 
         let end = if utils::is_alphanumericx(start) {
-            utils::find_to_right(line, cursor.x, |ch| !utils::is_alphanumericx(ch))
+            word::to_right(line, cursor.x, |ch| !utils::is_alphanumericx(ch))
         } else {
-            utils::find_to_right(line, cursor.x, |ch| ch != start)
+            word::to_right(line, cursor.x, |ch| ch != start)
         };
 
         cursor.x      = end.unwrap_or(file.lines[cursor.y as usize].utf8_len());

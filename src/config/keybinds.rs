@@ -1,4 +1,4 @@
-// mochou-p/text-editor/src/keybinds.rs
+// mochou-p/text-editor/src/config/keybinds.rs
 
 use std::collections::HashMap;
 

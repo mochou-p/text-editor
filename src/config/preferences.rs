@@ -1,4 +1,4 @@
-/* mochou-p/text-editor/src/preferences.rs
+/* mochou-p/text-editor/src/config/preferences.rs
 
 type Mask = u16;
 
