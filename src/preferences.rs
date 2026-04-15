@@ -1,4 +1,4 @@
-// text-editor/src/preferences.rs
+/* mochou-p/text-editor/src/preferences.rs
 
 type Mask = u16;
 
@@ -31,8 +31,10 @@ impl Default for PreferenceMask {
     fn default() -> Self {
         Self(
             Self::all().0
-                & !(Self::FILE_SAVE_ON_EDITOR_EXIT)
+            &
+            !(Self::FILE_SAVE_ON_EDITOR_EXIT)
         )
     }
 }
+*/
 

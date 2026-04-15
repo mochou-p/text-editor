@@ -1,127 +1,210 @@
-// text-editor/src/actions/typing.rs
-
-use std::io::Write as _;
-
-use betterm::clear;
+// mochou-p/text-editor/src/actions/typing.rs
 
 use crate::Editor;
-use crate::preferences::PreferenceMask;
-use crate::utf8::{Utf8Len, Utf8Range, Utf8Drain};
+use crate::utf8::{Utf8, Utf8Mut};
+use crate::utils;
 
 
-pub fn erase_character_left(editor: &mut Editor) {
-    if editor.cursor.x == 0 {
-        if
-            (editor.config.preferences.0 & PreferenceMask::TYPING_ERASE_CHARACTER_LEFT_WRAPS_AT_LINE_BOUNDARY) == 0
-            ||
-            editor.cursor.y == 0
-        {
-            editor.cursor.last_x = 0;
-            return;
+pub fn newline(editor: &mut Editor) {
+    let file   = editor.files.get_mut(&editor.view.file).unwrap();
+    file.clean = false;
+
+    for (i, cursor) in file.cursors.iter_mut().enumerate() {
+        let trail = file.lines[cursor.y as usize].utf8_split_off(cursor.x);
+
+        cursor.x       = 0;
+        cursor.last_x  = cursor.x;
+        cursor.y      += 1;
+
+        file.lines.insert(cursor.y as usize, trail);
+
+        if i == 0 {
+            Editor::snap_to_cursor(&mut editor.view, cursor);
         }
-
-        editor.wrapping_erase_character_left();
-    } else {
-        editor.normal_erase_character_left();
     }
-
-    editor.stdout.flush().unwrap();
-
-    editor.refresh();
 }
 
-pub fn erase_character_right(editor: &mut Editor) {
-    let current_line_len = editor.lines[editor.cursor.y].utf8_len();
+pub fn tab(editor: &mut Editor) {
+    let file   = editor.files.get_mut(&editor.view.file).unwrap();
+    file.clean = false;
 
-    if editor.cursor.x == current_line_len {
-        if
-            (editor.config.preferences.0 & PreferenceMask::TYPING_ERASE_CHARACTER_RIGHT_WRAPS_AT_LINE_BOUNDARY) == 0
-            ||
-            editor.cursor.y == editor.lines.len() - 1
-        {
-            editor.cursor.last_x = current_line_len;
-            return;
+    for (i, cursor) in file.cursors.iter_mut().enumerate() {
+        let count = 4 - (cursor.x as usize % 4);
+
+        file.lines[cursor.y as usize].utf8_insert_str(cursor.x, &(" ".repeat(count)));
+
+        cursor.x += count as isize;
+
+        if i == 0 {
+            Editor::snap_to_cursor(&mut editor.view, cursor);
         }
-
-        editor.wrapping_erase_character_right();
-    } else {
-        editor.normal_erase_character_right();
     }
-
-    editor.stdout.flush().unwrap();
-
-    editor.refresh();
 }
 
-pub fn erase_word_left(editor: &mut Editor) {
-    if editor.cursor.x == 0 {
-        if
-            (editor.config.preferences.0 & PreferenceMask::TYPING_ERASE_WORD_LEFT_WRAPS_AT_LINE_BOUNDARY) == 0
-            ||
-            editor.cursor.y == 0
-        {
-            editor.cursor.last_x = 0;
-            return;
+pub fn character(editor: &mut Editor, ch: char) {
+    let file   = editor.files.get_mut(&editor.view.file).unwrap();
+    file.clean = false;
+
+    for (i, cursor) in file.cursors.iter_mut().enumerate() {
+        file.lines[cursor.y as usize].utf8_insert(cursor.x, ch);
+
+        cursor.x      += 1;
+        cursor.last_x  = cursor.x;
+
+        if i == 0 {
+            Editor::snap_to_cursor(&mut editor.view, cursor);
         }
-
-        editor.wrapping_erase_character_left();
-    } else {
-        let start = editor.utf8_position_of_left_whitespace();
-
-        editor.lines[editor.cursor.y]
-            .utf8_drain(start, editor.cursor.x);
-
-        editor.cursor.x      = start;
-        editor.cursor.last_x = start;
-
-        write!(
-            editor.stdout,
-            "{}{}{}{}",
-            editor.update_cursor_position(),
-            editor.lines[editor.cursor.y].utf8_range(editor.cursor.x, editor.lines[editor.cursor.y].utf8_len()),
-            clear::LINE_RIGHT_OF_CURSOR,
-            editor.update_cursor_position()
-        ).unwrap();
-
-        editor.clean = false;
     }
-
-    editor.stdout.flush().unwrap();
 }
 
-pub fn erase_word_right(editor: &mut Editor) {
-    let current_line_len = editor.lines[editor.cursor.y].utf8_len();
+pub fn erase_left(editor: &mut Editor) {
+    let file = editor.files.get_mut(&editor.view.file).unwrap();
 
-    if editor.cursor.x == current_line_len {
-        if
-            (editor.config.preferences.0 & PreferenceMask::TYPING_ERASE_WORD_RIGHT_WRAPS_AT_LINE_BOUNDARY) == 0
-            ||
-            editor.cursor.y == editor.lines.len() - 1
-        {
-            editor.cursor.last_x = current_line_len;
+    for (i, cursor) in file.cursors.iter_mut().enumerate() {
+        if cursor.x == 0 {
+            if cursor.y != 0 {
+                let line = file.lines.remove(cursor.y as usize);
+
+                cursor.y -= 1;
+                cursor.x  = file.lines[cursor.y as usize].utf8_len();
+
+                file.lines[cursor.y as usize].push_str(&line);
+                file.clean = false;
+            }
+        } else {
+            cursor.x -= 1;
+
+            file.lines[cursor.y as usize].utf8_remove(cursor.x);
+            file.clean = false;
+        }
+
+        cursor.last_x = cursor.x;
+
+        if i == 0 {
+            Editor::snap_to_cursor(&mut editor.view, cursor);
+        }
+    }
+}
+
+pub fn erase_right(editor: &mut Editor) {
+    let file = editor.files.get_mut(&editor.view.file).unwrap();
+
+    for (i, cursor) in file.cursors.iter_mut().enumerate() {
+        if cursor.x == file.lines[cursor.y as usize].utf8_len() {
+            if cursor.y != (file.lines.len() - 1) as isize {
+                let line = file.lines.remove((cursor.y + 1) as usize);
+
+                file.lines[cursor.y as usize].push_str(&line);
+                file.clean = false;
+            }
+        } else {
+            file.lines[cursor.y as usize].utf8_remove(cursor.x);
+            file.clean = false;
+        }
+
+        cursor.last_x = cursor.x;
+
+        if i == 0 {
+            Editor::snap_to_cursor(&mut editor.view, cursor);
+        }
+    }
+}
+
+pub fn move_line_up(editor: &mut Editor) {
+    let file = editor.files.get_mut(&editor.view.file).unwrap();
+
+    for (i, cursor) in file.cursors.iter_mut().enumerate() {
+        if cursor.y != 0 {
+            file.lines.swap(cursor.y as usize, (cursor.y - 1) as usize);
+            cursor.y -= 1;
+
+            file.clean = false;
+        }
+
+        cursor.last_x = cursor.x;
+
+        if i == 0 {
+            Editor::snap_to_cursor(&mut editor.view, cursor);
+        }
+    }
+}
+
+pub fn move_line_down(editor: &mut Editor) {
+    let file = editor.files.get_mut(&editor.view.file).unwrap();
+
+    for (i, cursor) in file.cursors.iter_mut().enumerate() {
+        if cursor.y != (file.lines.len() - 1) as isize {
+            file.lines.swap(cursor.y as usize, (cursor.y + 1) as usize);
+            cursor.y += 1;
+
+            file.clean = false;
+        }
+
+        cursor.last_x = cursor.x;
+
+        if i == 0 {
+            Editor::snap_to_cursor(&mut editor.view, cursor);
+        }
+    }
+}
+
+pub fn erase_prev_word(editor: &mut Editor) {
+    let file = editor.files.get_mut(&editor.view.file).unwrap();
+
+    for (i, cursor) in file.cursors.iter_mut().enumerate() {
+        if cursor.x == 0 {
+            erase_left(editor);
             return;
         }
 
-        editor.wrapping_erase_character_right();
-    } else {
-        let offset = editor.utf8_offset_to_right_whitespace();
+        let line  = &mut file.lines[cursor.y as usize];
+        let start = line.chars().nth((cursor.x - 1) as usize).unwrap();
 
-        editor.lines[editor.cursor.y]
-            .utf8_drain(editor.cursor.x, editor.cursor.x + offset);
+        let end = if utils::is_alphanumericx(start) {
+            utils::find_to_left(line, cursor.x, |ch| !utils::is_alphanumericx(ch))
+        } else {
+            utils::find_to_left(line, cursor.x, |ch| ch != start)
+        };
 
-        editor.cursor.last_x = editor.cursor.x;
+        let old_x     = cursor.x;
+        cursor.x      = end.map(|i| i+1).unwrap_or(0);
+        cursor.last_x = cursor.x;
 
-        write!(
-            editor.stdout,
-            "{}{}{}",
-            editor.lines[editor.cursor.y].utf8_range(editor.cursor.x, editor.lines[editor.cursor.y].utf8_len()),
-            clear::LINE_RIGHT_OF_CURSOR,
-            editor.update_cursor_position()
-        ).unwrap();
+        line.utf8_drain(cursor.x, old_x);
 
-        editor.clean = false;
+        if i == 0 {
+            Editor::snap_to_cursor(&mut editor.view, cursor);
+        }
     }
+}
 
-    editor.stdout.flush().unwrap();
+pub fn erase_next_word(editor: &mut Editor) {
+    let file = editor.files.get_mut(&editor.view.file).unwrap();
+
+    for (i, cursor) in file.cursors.iter_mut().enumerate() {
+        let line = &file.lines[cursor.y as usize];
+
+        if cursor.x == line.utf8_len() {
+            erase_right(editor);
+            return;
+        }
+
+        let line  = &mut file.lines[cursor.y as usize];
+        let start = line.chars().nth(cursor.x as usize).unwrap();
+
+        let end = if utils::is_alphanumericx(start) {
+            utils::find_to_right(line, cursor.x, |ch| !utils::is_alphanumericx(ch))
+        } else {
+            utils::find_to_right(line, cursor.x, |ch| ch != start)
+        };
+
+        cursor.last_x = cursor.x;
+
+        line.utf8_drain(cursor.x, end.unwrap_or(line.utf8_len()));
+
+        if i == 0 {
+            Editor::snap_to_cursor(&mut editor.view, cursor);
+        }
+    }
 }
 

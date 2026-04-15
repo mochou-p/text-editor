@@ -1,4 +1,4 @@
-# text-editor/.gitignore
+# mochou-p/text-editor/.gitignore
 
 target/
 Cargo.lock

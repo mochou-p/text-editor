@@ -1,98 +1,81 @@
-// text-editor/src/utf8.rs
+// mochou-p/text-editor/src/utf8.rs
 
-pub trait Utf8Len {
-    fn utf8_len(&self) -> usize;
+type Index  = isize;
+type Length = isize;
+
+#[allow(dead_code)]
+pub trait Utf8 {
+    fn utf8_len  (&self                          ) -> Length;
+    fn utf8_range(&self, start: Index, end: Index) -> String;
+    fn utf8_index(&self, idx:   Index            ) ->  Index;
 }
 
-impl Utf8Len for str {
-    fn utf8_len(&self) -> usize {
-        self.chars().count()
+#[allow(dead_code)]
+pub trait Utf8Mut {
+    fn utf8_insert    (&mut self, idx:   Index, ch:  char )          ;
+    fn utf8_insert_str(&mut self, idx:   Index, ch:  &str )          ;
+    fn utf8_remove    (&mut self, idx:   Index            )          ;
+    fn utf8_split_off (&mut self, at:    Index            ) -> String;
+    fn utf8_drain     (&mut self, start: Index, end: Index)          ;
+}
+
+impl Utf8 for str {
+    fn utf8_len(&self) -> Length {
+        self.chars().count() as Length
     }
-}
 
-impl Utf8Len for String {
-    fn utf8_len(&self) -> usize {
-        self.as_str().utf8_len()
-    }
-}
-
-pub trait Utf8Range {
-    fn utf8_range(&self, start: usize, end: usize) -> String;
-}
-
-impl Utf8Range for str {
-    fn utf8_range(&self, start: usize, end: usize) -> String {
+    fn utf8_range(&self, start: isize, end: isize) -> String {
         self.chars()
-            .skip(start)
-            .take(end - start)
+            .skip(start as usize)
+            .take((end - start) as usize)
             .collect()
     }
+
+    fn utf8_index(&self, idx: isize) -> Index {
+        self.char_indices()
+            .nth(idx as usize)
+            // NOTE: wait why did i map else to len
+            .map_or_else(|| self.len(), |(i, _)| i)
+            as Index
+    }
 }
 
-impl Utf8Range for String {
-    fn utf8_range(&self, start: usize, end: usize) -> String {
+impl Utf8 for String {
+    fn utf8_len(&self) -> Length {
+        self.as_str().utf8_len()
+    }
+
+    fn utf8_range(&self, start: isize, end: isize) -> String {
         self.as_str().utf8_range(start, end)
     }
-}
 
-pub trait Utf8Index {
-    fn utf8_index(&self, idx: usize) -> usize;
-}
-
-impl Utf8Index for str {
-    fn utf8_index(&self, idx: usize) -> usize {
-        self.char_indices()
-            .nth(idx)
-            .map_or_else(|| self.len(), |(i, _)| i)
-    }
-}
-
-impl Utf8Index for String {
-    fn utf8_index(&self, idx: usize) -> usize {
+    fn utf8_index(&self, idx: isize) -> Index {
         self.as_str().utf8_index(idx)
     }
 }
 
-pub trait Utf8Insert {
-    fn utf8_insert(&mut self, idx: usize, ch: char);
-}
-
-impl Utf8Insert for String {
-    fn utf8_insert(&mut self, idx: usize, ch: char) {
-        self.insert(self.utf8_index(idx), ch);
+impl Utf8Mut for String {
+    fn utf8_insert(&mut self, idx: Index, ch: char) {
+        self.insert(self.utf8_index(idx) as usize, ch);
     }
-}
 
-pub trait Utf8Remove {
-    fn utf8_remove(&mut self, idx: usize);
-}
-
-impl Utf8Remove for String {
-    fn utf8_remove(&mut self, idx: usize) {
-        self.remove(self.utf8_index(idx));
+    fn utf8_insert_str(&mut self, idx: Index, s: &str) {
+        self.insert_str(self.utf8_index(idx) as usize, s);
     }
-}
 
-pub trait Utf8SplitOff {
-    fn utf8_split_off(&mut self, at: usize) -> String;
-}
-
-impl Utf8SplitOff for String {
-    fn utf8_split_off(&mut self, at: usize) -> String {
-        self.split_off(self.utf8_index(at))
+    fn utf8_remove(&mut self, idx: Index) {
+        self.remove(self.utf8_index(idx) as usize);
     }
-}
 
-pub trait Utf8Drain {
-    fn utf8_drain(&mut self, start: usize, end: usize);
-}
+    fn utf8_split_off(&mut self, at: Index) -> String {
+        self.split_off(self.utf8_index(at) as usize)
+    }
 
-impl Utf8Drain for String {
-    fn utf8_drain(&mut self, start: usize, end: usize) {
+    fn utf8_drain(&mut self, start: Index, end: Index) {
         self.drain(
-            self.utf8_index(start)
+            self.utf8_index(start) as usize
             ..
-            self.utf8_index(end)
+            self.utf8_index(end) as usize
         );
     }
 }

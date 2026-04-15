@@ -1,4 +1,4 @@
-# text-editor/Cargo.toml
+# mochou-p/text-editor/Cargo.toml
 
 [package]
 publish      = false
@@ -36,11 +36,5 @@ codegen-units    = 1
 
 [dependencies]
 betterm = { git = "https://github.com/mochou-p/betterm" }
-termion = "4.0.5"
-
-[lints.clippy]
-all      = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-nursery  = { level = "warn", priority = -1 }
-cargo    = { level = "warn", priority = -1 }
+termion = "4.0.6"
 

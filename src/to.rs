@@ -1,4 +1,4 @@
-// text-editor/src/to.rs
+// mochou-p/text-editor/src/to.rs
 
 pub trait ToMinWith: Ord + Copy {
     fn to_min_with(&mut self, rhs: Self) -> &mut Self {
@@ -7,7 +7,7 @@ pub trait ToMinWith: Ord + Copy {
     }
 }
 
-impl ToMinWith for usize {}
+impl ToMinWith for isize {}
 
 pub trait ToMaxWith: Ord + Copy {
     fn to_max_with(&mut self, rhs: Self) -> &mut Self {
@@ -16,5 +16,5 @@ pub trait ToMaxWith: Ord + Copy {
     }
 }
 
-impl ToMaxWith for usize {}
+impl ToMaxWith for isize {}
 
