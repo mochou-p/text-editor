@@ -37,4 +37,3 @@ codegen-units    = 1
 [dependencies]
 betterm = { git = "https://github.com/mochou-p/betterm" }
 termion = "4.0.6"
-

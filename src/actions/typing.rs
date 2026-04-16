@@ -206,4 +206,3 @@ pub fn erase_next_word(editor: &mut Editor) {
         }
     }
 }
-

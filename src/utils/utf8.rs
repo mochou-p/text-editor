@@ -79,4 +79,3 @@ impl Utf8Mut for String {
         );
     }
 }
-

@@ -55,8 +55,12 @@ pub fn file_end(editor: &mut Editor) {
 
     for (i, cursor) in file.cursors.iter_mut().enumerate() {
         if cursor.y != line_count - 1 {
-            cursor.y             = line_count - 1;
-            editor.view.scroll.y = line_count.saturating_sub(editor.view.size.y);
+            cursor.y = line_count - 1;
+
+            let real_y = cursor.y - editor.view.scroll.y;
+            if real_y > editor.view.size.y {
+                editor.view.scroll.y = line_count - editor.view.size.y;
+            }
 
             cursor.x
                 .to_max_with(cursor.last_x)
@@ -213,4 +217,3 @@ pub fn next_word(editor: &mut Editor) {
         }
     }
 }
-

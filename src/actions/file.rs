@@ -27,4 +27,3 @@ pub fn save(editor: &mut Editor) {
     std::fs::write(&editor.view.file, writee).unwrap();
     editor.files.get_mut(&editor.view.file).unwrap().clean = true;
 }
-

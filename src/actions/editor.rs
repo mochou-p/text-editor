@@ -6,4 +6,3 @@ use crate::Editor;
 pub fn exit(editor: &mut Editor) {
     editor.exit = true;
 }
-

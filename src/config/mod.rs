@@ -4,4 +4,3 @@ mod keybinds;
 mod theme;
 
 pub use {keybinds::Keybinds, theme::Theme};
-

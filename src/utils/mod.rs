@@ -10,4 +10,3 @@ pub use {to_with::ToWith, utf8::{Utf8, Utf8Mut}};
 pub fn is_alphanumericx(ch: char) -> bool {
     ch == '_' || ch.is_alphanumeric()
 }
-

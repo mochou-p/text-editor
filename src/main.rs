@@ -58,7 +58,7 @@ struct View {
     file:     String,
     position: Ivec2,
     size:     Ivec2,
-    scroll:   Ivec2 // TODO: dont ignore `x`
+    scroll:   Ivec2
 }
 
 struct Cursor {
@@ -151,10 +151,11 @@ impl Editor {
             );
         }));
 
-        self.initialise();
         let result = catch_unwind(AssertUnwindSafe(|| {
+            self.initialise();
             self.inner_run();
         }));
+
         self.shutdown();
         let _ = take_hook();
 
@@ -206,7 +207,12 @@ impl Editor {
     }
 
     fn reprint(&mut self) {
-        write!(self.stdout, "{}", clear::WHOLE_SCREEN).unwrap();
+        write!(
+            self.stdout,
+            "{}{}",
+            color::UNSET_BG,
+            clear::WHOLE_SCREEN
+        ).unwrap();
 
         for i in 0..self.view.size.y {
             let x = self.view.scroll.x;
@@ -235,20 +241,49 @@ impl Editor {
                     " ".repeat((self.view.size.x - visible_line.utf8_len()).max(0) as usize)
                 ).unwrap();
 
-                if !cursor_line && visible_line.ends_with(' ') {
-                    let line_len = visible_line.utf8_len() as usize;
-                    let count    = visible_line.rfind(|ch| ch != ' ')
+                // TODO: this can be simplified a lot
+                if !cursor_line && line.utf8_len() > self.view.scroll.x && line.ends_with(' ') {
+                    let line_len = line.utf8_len() as usize;
+                    let count    = line.rfind(|ch| ch != ' ')
                         .map(|n| line_len - n - 1)
                         .unwrap_or(line_len);
 
+                    let start = (line_len - count) as isize;
+                    if start < self.view.scroll.x + self.view.size.x {
+                        let real_start    = self.view.position.x + 1 + start - self.view.scroll.x;
+                        let left_overflow = (real_start - self.view.position.x - 1).min(0);
+
+                        write!(
+                            self.stdout,
+                            "{}{}{}",
+                            cursor::MoveToColumn((real_start - left_overflow) as u16),
+                            self.theme.bad_trail,
+                            " ".repeat(
+                                (
+                                    count.min((self.view.size.x - (start - self.view.scroll.x)) as usize) as isize
+                                    -
+                                    (-left_overflow)
+                                ) as usize
+                            )
+                        ).unwrap();
+                    }
+                }
+
+                if self.view.scroll.x > 0 {
                     write!(
                         self.stdout,
-                        "{}{}{}",
-                        cursor::MoveToColumn(
-                            (self.view.position.x + 1 + (line_len - count) as isize) as u16
-                        ),
-                        self.theme.bad_trail,
-                        " ".repeat(count)
+                        "{}{}<",
+                        cursor::MoveToColumn((self.view.position.x + 1) as u16),
+                        self.theme.overflow
+                    ).unwrap();
+                }
+
+                if line.utf8_len() - self.view.scroll.x - self.view.size.x > 0 {
+                    write!(
+                        self.stdout,
+                        "{}{}>",
+                        cursor::MoveToColumn((self.view.position.x + self.view.size.x) as u16),
+                        self.theme.overflow
                     ).unwrap();
                 }
             } else {
@@ -267,6 +302,7 @@ impl Editor {
         let (vx, vy) = self.cursor_visible_relative_position();
 
         // TODO: with more cursors, just draw them if visible
+        //       (actually, just draw all of them with invert (bg<=>fg))
         if vx < 1 || vy < 1 || vx > self.view.size.x || vy > self.view.size.y {
             write!(self.stdout, "{}", cursor::HIDE).unwrap();
         } else {
@@ -281,23 +317,36 @@ impl Editor {
             ).unwrap();
         }
 
+        self.theme.update();
+
         self.stdout.flush().unwrap();
     }
 
-    // TODO: dont ignore `x`
     fn snap_to_cursor(view: &mut View, cursor: &Cursor) {
         if cursor.y < view.scroll.y {
             view.scroll.y = cursor.y;
         } else if cursor.y > view.scroll.y + view.size.y - 1 {
             view.scroll.y = cursor.y - view.size.y + 1;
         }
+
+        if cursor.x < view.scroll.x {
+            view.scroll.x = cursor.x;
+        } else if cursor.x > view.scroll.x + view.size.x - 1 {
+            view.scroll.x = cursor.x - view.size.x + 1;
+        }
     }
 
-    // TODO: should remove all other cursors
     fn warp_cursor(&mut self, x: u16, y: u16) {
+        // TODO: when there are more views, only map from scroll space,
+        //       position space will be fixed outside when events are passed
+
         let y = {
             let line_count = self.files[&self.view.file].lines.len() as isize;
-            let cursor     = &mut self.files.get_mut(&self.view.file).unwrap().cursors[0];
+            let file       = &mut self.files.get_mut(&self.view.file).unwrap();
+
+            file.cursors.drain(1..);
+
+            let cursor = &mut file.cursors[0];
 
             cursor.y = (y - 1) as isize - self.view.position.y + self.view.scroll.y;
             cursor.x = (x - 1) as isize - self.view.position.x + self.view.scroll.x;
@@ -313,4 +362,3 @@ impl Editor {
         cursor.last_x = (x - 1) as isize;
     }
 }
-

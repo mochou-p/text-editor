@@ -10,10 +10,7 @@ pub fn scroll_down(editor: &mut Editor) {
 }
 
 pub fn scroll_up(editor: &mut Editor) {
-    // NOTE: could also show upper void, why not :D
-    //       thats a nice use of view.position being isize
     if editor.view.scroll.y != 0 {
         editor.view.scroll.y -= 1;
     }
 }
-

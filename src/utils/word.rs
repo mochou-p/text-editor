@@ -40,4 +40,3 @@ pub fn to_right(string: &str, mut i: isize, f: impl Fn(char) -> bool) -> Option<
 
     index
 }
-
