@@ -1,6 +1,8 @@
 // mochou-p/text-editor/src/main.rs
 
 mod config;
+mod insert_set;
+mod ivec2;
 mod utils;
 mod view;
 
@@ -8,14 +10,14 @@ use std::collections::HashMap;
 use std::io::{self, Stdout, Write as _};
 use std::panic::{set_hook, take_hook, catch_unwind, AssertUnwindSafe};
 use std::sync::OnceLock;
-
-use betterm::{clear, color, cursor, screen};
-
+use termion::event::{Event, MouseEvent, MouseButton};
 use termion::input::{MouseTerminal, TermRead as _};
 use termion::raw::{RawTerminal, IntoRawMode as _};
-
+use betterm::{clear, color, cursor, screen};
 use config::Theme;
 use view::{View, Browsing, Editing, Files};
+
+pub use {insert_set::InsertSet, ivec2::Ivec2};
 
 
 static PANIC_LOCATION: OnceLock<String> = OnceLock::new();
@@ -39,69 +41,44 @@ fn main() {
 }
 
 struct Editor {
-    exit:     bool,
-    stdout:   MouseTerminal<RawTerminal<Stdout>>,
-    theme:    Theme,
-    view:     String,
-    views:    HashMap<String, Box<dyn View>>,
-    files:    HashMap<String, File>
+    exit:   bool,
+    stdout: MouseTerminal<RawTerminal<Stdout>>,
+    theme:  Theme,
+    cursor: Option<(isize, isize)>,
+    view:   String,
+    views:  HashMap<String, Box<dyn View>>
 }
 
-pub struct File {
-    clean:   bool,
-    cursors: Vec<Cursor>,
-    lines:   Vec<String>
-}
-
+#[derive(Default, Clone)]
 struct Cursor {
     last_x: isize,
     x:      isize,
     y:      isize
 }
 
-#[derive(Clone, Copy)]
-struct Ivec2 {
-    x: isize,
-    y: isize
-}
-
-impl From<(u16, u16)> for Ivec2 {
-    fn from(value: (u16, u16)) -> Self {
-        Self { x: value.0 as isize, y: value.1 as isize }
-    }
-}
-
-impl Default for Ivec2 {
-    fn default() -> Self {
-        Self::ZERO
-    }
-}
-
-impl Ivec2 {
-    const ZERO: Self = Self { x: 0, y: 0 };
-}
-
 impl Editor {
     fn new() -> Self {
         Self {
             exit:   false,
+            // NOTE: lock?
             stdout: MouseTerminal::from(io::stdout().into_raw_mode().unwrap()),
             theme:  Theme::default(),
+            cursor: None,
             view:   Editing::name(),
-            views:  HashMap::new(),
-            files:  HashMap::new()
+            views:  HashMap::new()
         }
     }
 
     fn initialise(&mut self) {
         write!(
             self.stdout,
-            "{}{}",
+            "{}{}{}",
+            cursor::HIDE,
             screen::ENTER_ALTERNATE,
             clear::WHOLE_SCREEN
         ).unwrap();
 
-        let editing = Editing::new(self);
+        let editing = Editing::new();
         self.views.insert(Editing::name(), Box::new(editing));
 
         let browsing = Browsing::new(self);
@@ -115,8 +92,8 @@ impl Editor {
         write!(
             self.stdout,
             "{}{}{}",
-            cursor::SHOW,
             screen::LEAVE_ALTERNATE,
+            cursor::SHOW,
             betterm::RESET_ALL
         ).unwrap();
 
@@ -160,17 +137,77 @@ impl Editor {
         result.is_ok()
     }
 
-    // TODO: clean up
-    fn inner_run(&mut self) {
-        let keys = self.views.keys().cloned().collect::<Vec<String>>();
+    fn try_update_focus(&mut self, event: &Event) {
+        let Event::Mouse(MouseEvent::Press(MouseButton::Left, x, y)) = event else {
+            return;
+        };
 
-        for key in &keys {
+        let x = *x as isize;
+        let y = *y as isize;
+
+        for name in self.views.keys() {
+            let view = &self.views[name];
+
+            let xy1 = view.position() + Ivec2::ONE;
+            let xy2 = xy1 + view.size();
+
+            if x >= xy1.x && y >= xy1.y && x <= xy2.x && y <= xy2.y {
+                self.view = name.clone();
+                return;
+            }
+        }
+    }
+
+    fn handle_event(&mut self, event: Event) {
+        let     name = self.view.clone();
+        let mut view = self.views.remove(&name).unwrap();
+
+        view.handle_event(self, event);
+
+        self.views.insert(name, view);
+    }
+
+    fn reprint_views(&mut self, keys: &[String], buffer: &mut String) {
+        for key in keys {
             let mut view = self.views.remove(key).unwrap();
-            view.reprint(self);
-            self.views.insert(key.to_owned(), view);
+
+            for i in 0..view.size().y {
+                buffer.clear();
+                view.print_line(self, buffer, i as usize, (i + view.scroll().y) as usize);
+
+                // TODO: cut printed width of String to size.x here somehow (+background fill)
+                write!(
+                    self.stdout,
+                    "{}{buffer}",
+                    cursor::MoveToColumnAndRow(
+                        (view.position().x + 1)     as u16,
+                        (view.position().y + 1 + i) as u16
+                    )
+                ).unwrap();
+            }
+
+            self.views.insert(String::from(key), view);
+        }
+
+        if let Some((x, y)) = self.cursor.take() {
+            write!(
+                self.stdout,
+                "{}{}",
+                cursor::SHOW,
+                cursor::MoveToColumnAndRow(x as u16, y as u16)
+            ).unwrap();
+        } else {
+            write!(self.stdout, "{}", cursor::HIDE).unwrap();
         }
 
         self.stdout.flush().unwrap();
+    }
+
+    fn inner_run(&mut self) {
+        let     keys   = self.views.keys().cloned().collect::<Vec<String>>();
+        let mut buffer = String::with_capacity(1024);
+
+        self.reprint_views(&keys, &mut buffer);
 
         let stdin  = io::stdin();
         let handle = stdin.lock();
@@ -178,33 +215,33 @@ impl Editor {
         for event in handle.events() {
             let event = event.unwrap();
 
-            let     name = self.view.clone();
-            let mut view = self.views.remove(&name).unwrap();
-            view.handle_event(self, event);
-            self.views.insert(name, view);
-
-            for key in &keys {
-                let mut view = self.views.remove(key).unwrap();
-                view.reprint(self);
-                self.views.insert(key.to_owned(), view);
-            }
+            self.try_update_focus(&event);
+            self.handle_event(event);
 
             if self.exit {
                 break;
             }
 
-            self.stdout.flush().unwrap();
+            self.reprint_views(&keys, &mut buffer);
         }
     }
 
-    fn view<T: View + 'static>(&mut self) -> &mut T {
-        (
-            self.views
-                .get_mut(&T::name())
-                .unwrap()
-                as &mut dyn std::any::Any
-        )
+    fn view<T: View + 'static, R>(&mut self, f: impl Fn(&mut Self, &mut T) -> R) -> R {
+        let name = T::name();
+
+        let mut view = self.views
+            .remove(&name)
+            .unwrap();
+
+        let t = view
+            .any()
             .downcast_mut::<T>()
-            .unwrap()
+            .unwrap();
+
+        let result = f(self, t);
+
+        self.views.insert(name, view);
+
+        result
     }
 }

@@ -36,4 +36,5 @@ codegen-units    = 1
 
 [dependencies]
 betterm = { git = "https://github.com/mochou-p/betterm" }
+libc    = "0.2.185"
 termion = "4.0.6"
