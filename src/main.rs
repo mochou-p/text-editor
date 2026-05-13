@@ -64,7 +64,7 @@ impl Editor {
             stdout: MouseTerminal::from(io::stdout().into_raw_mode().unwrap()),
             theme:  Theme::default(),
             cursor: None,
-            view:   Editing::name(),
+            view:   Browsing::name(),
             views:  HashMap::new()
         }
     }
@@ -137,22 +137,24 @@ impl Editor {
         result.is_ok()
     }
 
-    fn try_update_focus(&mut self, event: &Event) {
+    fn try_update_focus(&mut self, event: &mut Event) {
         let Event::Mouse(MouseEvent::Press(MouseButton::Left, x, y)) = event else {
             return;
         };
 
-        let x = *x as isize;
-        let y = *y as isize;
+        *x -= 1;
+        *y -= 1;
 
         for name in self.views.keys() {
             let view = &self.views[name];
 
-            let xy1 = view.position() + Ivec2::ONE;
-            let xy2 = xy1 + view.size();
+            let xy1 = view.position();
+            let xy2 = xy1 + view.size() - Ivec2::ONE;
 
-            if x >= xy1.x && y >= xy1.y && x <= xy2.x && y <= xy2.y {
-                self.view = name.clone();
+            if *x >= xy1.x as u16 && *y >= xy1.y as u16 && *x <= xy2.x as u16 && *y <= xy2.y as u16 {
+                *x        -= xy1.x as u16;
+                *y        -= xy1.y as u16;
+                self.view  = name.clone();
                 return;
             }
         }
@@ -213,9 +215,9 @@ impl Editor {
         let handle = stdin.lock();
 
         for event in handle.events() {
-            let event = event.unwrap();
+            let mut event = event.unwrap();
 
-            self.try_update_focus(&event);
+            self.try_update_focus(&mut event);
             self.handle_event(event);
 
             if self.exit {

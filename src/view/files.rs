@@ -1,6 +1,7 @@
 // mochou-p/text-editor/src/view/files.rs
 
 use std::path::PathBuf;
+use termion::event::{Event, MouseEvent, MouseButton};
 use super::editing::Editing;
 use super::{View, ViewData};
 use crate::{Editor, InsertSet};
@@ -38,7 +39,8 @@ impl View for Files {
         let mut size = self.size().x as usize;
 
         for file in self.files.iter() {
-            let text = format!(" {:?} ", file.file_name().unwrap());
+            let text = file.file_name().unwrap();
+            let text = format!(" {} ", text.display().to_string());
             let len  = text.len();
 
             if len > size {
@@ -65,5 +67,27 @@ impl View for Files {
             editor.theme.backgrounds.primary.disabled,
             " ".repeat(size)
         ));
+    }
+
+    fn handle_event(&mut self, editor: &mut Editor, event: Event) {
+        let Event::Mouse(MouseEvent::Press(mouse_button, x, _y)) = event else {
+            return;
+        };
+        if !matches!(mouse_button, MouseButton::Left) {
+            return;
+        }
+
+        let mut fx = 0;
+        for file in self.files.iter() {
+            let size = file.file_name().unwrap().len() + 2;
+
+            if (x as usize) < fx + size {
+                self.file = Some(file.clone());
+                editor.view::<Editing, ()>(|editor, view| view.open_file_from_files(editor, file.clone()));
+                break;
+            }
+
+            fx += size;
+        }
     }
 }

@@ -46,12 +46,18 @@ impl Editing {
         }
     }
 
-    pub fn open_file(&mut self, editor: &mut Editor, path: PathBuf) {
+    pub fn open_file_from_browser(&mut self, editor: &mut Editor, path: PathBuf) {
         let file = Self::read_file(&path);
         self.files.insert(path.clone(), file);
         self.file = Some(path.clone());
 
         editor.view::<Files, ()>(|_, view| view.add_file(path.clone()));
+    }
+
+    pub fn open_file_from_files(&mut self, _editor: &mut Editor, path: PathBuf) {
+        let file = Self::read_file(&path);
+        self.files.insert(path.clone(), file);
+        self.file = Some(path.clone());
     }
 
     fn cursor_visible_relative_position(&self, file: &PathBuf) -> (isize, isize) {
@@ -89,15 +95,14 @@ impl Editing {
 
         let y = {
             let line_count = self.files[file].lines.len() as isize;
-            let position   = self.position();
             let file       = &mut self.files.get_mut(file).unwrap();
 
             file.cursors.drain(1..);
 
             let cursor = &mut file.cursors[0];
 
-            cursor.y = (y - 1) as isize - position.y + scroll.y;
-            cursor.x = (x - 1) as isize - position.x + scroll.x;
+            cursor.y = y as isize + scroll.y;
+            cursor.x = x as isize + scroll.x;
 
             cursor.y.to_min_with(line_count - 1);
             cursor.y as usize
@@ -107,7 +112,7 @@ impl Editing {
         let cursor   = &mut self.files.get_mut(file).unwrap().cursors[0];
 
         cursor.x.to_min_with(line_len);
-        cursor.last_x = (x - 1) as isize;
+        cursor.last_x = x as isize + scroll.x;
     }
 }
 

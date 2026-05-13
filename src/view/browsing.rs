@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::path::PathBuf;
-use termion::event::{Event, Key};
+use termion::event::{Event, Key, MouseEvent, MouseButton};
 use super::{View, ViewData};
 use super::editing::Editing;
 use crate::Editor;
@@ -12,7 +12,6 @@ use crate::Editor;
 pub struct Browsing {
     view_data:   ViewData,
     current_dir: PathBuf,
-    // TODO: cache i for each dir path
     focused:     usize,
     focuses:     HashMap<PathBuf, usize>,
     parent:      Option<BrowserEntry>,
@@ -79,6 +78,10 @@ impl Browsing {
         (parent, dirs, files)
     }
 
+    fn entry_count(&self) -> usize {
+        self.parent.is_some() as usize + self.dirs.len() + self.files.len()
+    }
+
     fn up(&mut self) {
         if self.focused != 0 {
             self.focused -= 1;
@@ -134,7 +137,7 @@ impl Browsing {
             self.focused = self.focuses.get(&self.current_dir).map_or_else(|| 0, |i| *i);
         } else {
             i -= self.dirs.len() + self.parent.is_some() as usize - 1;
-            editor.view::<Editing, ()>(|editor, view| view.open_file(editor, self.files[i].path.clone()));
+            editor.view::<Editing, ()>(|editor, view| view.open_file_from_browser(editor, self.files[i].path.clone()));
         }
     }
 
@@ -241,6 +244,14 @@ impl View for Browsing {
                 Key::Left  | Key::Backspace  => { self.go_out()      },
                 Key::Right | Key::Char('\n') => { self.go_in(editor) },
                 _                            => ()
+            },
+            Event::Mouse(MouseEvent::Press(mouse_button, _x, y)) => {
+                if matches!(mouse_button, MouseButton::Left) {
+                    let y = y as usize;
+                    if y < self.entry_count() {
+                        self.focused = y as usize;
+                    }
+                }
             },
             _ => ()
         }
